@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using LyricsPlayer.ExtensionApp.Lyrics;
 using LyricsPlayer.ExtensionApp.Media;
 using LyricsPlayer.ExtensionApp.Views;
@@ -88,7 +88,11 @@ public sealed class MainPlugin :
         return _flyout;
     }
 
-    public UIElement? CreateSettingsContent(IWidgetSettingsContext context) => new SettingsView(context);
+    public UIElement? CreateSettingsContent(IWidgetSettingsContext context) =>
+        new SettingsView(context, _media, LiveSnapshot, () => _preview?.ActualWidth ?? 0);
+
+    /// <summary>What the settings page's sample preview shows: the real song, or null to use demo text.</summary>
+    private PlayerSnapshot? LiveSnapshot() => _media?.Track is null ? null : Snapshot();
 
     public override void OnSettingsDraftChanged(string settingsJson)
     {

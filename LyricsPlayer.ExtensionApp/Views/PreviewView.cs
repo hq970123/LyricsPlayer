@@ -1,4 +1,4 @@
-using LyricsPlayer.ExtensionApp.Media;
+﻿using LyricsPlayer.ExtensionApp.Media;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -28,17 +28,21 @@ public sealed class PreviewView : Grid
     private readonly RectangleGeometry _fillClip = new();
     private double _lastProgress;
 
+    private readonly StackPanel _text;
+    private readonly Canvas _lyricCanvas;
     private readonly StackPanel _controls;
+    private readonly Button _prev;
     private readonly Button _playPause;
+    private readonly Button _next;
     private string? _artKey;
     private bool _active = true;
     private WidgetSettings _settings = new();
 
-    public PreviewView(MediaSessionWatcher media)
+    public PreviewView(MediaSessionWatcher? media)
     {
         Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         Padding = new Thickness(4, 0, 4, 0);
-        ColumnSpacing = 10;
+        ColumnSpacing = 8;
         ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -70,7 +74,7 @@ public sealed class PreviewView : Grid
         var lyricGroup = new Grid { RenderTransform = _lyricShift };
         lyricGroup.Children.Add(_lyricBase);
         lyricGroup.Children.Add(_lyricFill);
-        var lyricCanvas = new Canvas { Height = 20 }; // Canvas lets the text be wider than the slot
+        var lyricCanvas = _lyricCanvas = new Canvas { Height = 20 }; // Canvas lets the text be wider than the slot
         lyricCanvas.Children.Add(lyricGroup);
         _lyricHost = new Grid { Clip = _lyricHostClip };
         _lyricHost.Children.Add(lyricCanvas);
@@ -85,7 +89,7 @@ public sealed class PreviewView : Grid
         _bigTitle = new MarqueeText(14) { Visibility = Visibility.Collapsed };
         _bigTitle.Inner.FontWeight = FontWeights.SemiBold;
 
-        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
+        var text = _text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
         text.Children.Add(_topLine);
         text.Children.Add(_lyricHost);
         text.Children.Add(_bigTitle);
@@ -93,17 +97,17 @@ public sealed class PreviewView : Grid
         Children.Add(text);
 
         // ---- Controls (clicking them does not open the flyout)
-        var prev = UiHelpers.IconButton(UiHelpers.GlyphPrevious, 32, 14, "上一首");
-        prev.Click += (_, _) => media.Previous();
-        _playPause = UiHelpers.IconButton(UiHelpers.GlyphPlay, 36, 16, "播放/暂停", filled: true);
-        _playPause.Click += (_, _) => media.TogglePlayPause();
-        var next = UiHelpers.IconButton(UiHelpers.GlyphNext, 32, 14, "下一首");
-        next.Click += (_, _) => media.Next();
+        var prev = _prev = UiHelpers.IconButton(UiHelpers.GlyphPrevious, 28, 13, "上一首");
+        prev.Click += (_, _) => media?.Previous();
+        _playPause = UiHelpers.IconButton(UiHelpers.GlyphPlay, 32, 15, "播放/暂停", filled: true);
+        _playPause.Click += (_, _) => media?.TogglePlayPause();
+        var next = _next = UiHelpers.IconButton(UiHelpers.GlyphNext, 28, 13, "下一首");
+        next.Click += (_, _) => media?.Next();
 
         _controls = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 4,
+            Spacing = 2,
             VerticalAlignment = VerticalAlignment.Center,
         };
         _controls.Children.Add(prev);
@@ -124,8 +128,7 @@ public sealed class PreviewView : Grid
     public void ApplySettings(WidgetSettings settings)
     {
         _settings = settings;
-        _art.Visibility = settings.ShowAlbumArt ? Visibility.Visible : Visibility.Collapsed;
-        _controls.Visibility = settings.ShowControls ? Visibility.Visible : Visibility.Collapsed;
+        ApplyLayout(settings);
 
         var text = settings.TextBrush;
         var highlight = settings.HighlightBrush;
@@ -149,6 +152,42 @@ public sealed class PreviewView : Grid
         }
 
         UpdateScrolling();
+    }
+
+    /// <summary>Sizes and spacing from the settings, so the text gets as much room as the user wants.</summary>
+    private void ApplyLayout(WidgetSettings settings)
+    {
+        ColumnSpacing = settings.Spacing;
+
+        _art.Visibility = settings.ShowAlbumArt ? Visibility.Visible : Visibility.Collapsed;
+        _art.Width = _art.Height = settings.CoverSize;
+        _art.CornerRadius = new CornerRadius(Math.Max(3, settings.CoverSize / 6.0));
+        _artPlaceholder.FontSize = Math.Round(settings.CoverSize * 0.45);
+
+        var play = settings.ButtonSize;
+        var side = play - 4;
+        SizeButton(_playPause, play, Math.Round(play * 0.46));
+        SizeButton(_prev, side, Math.Round(side * 0.46));
+        SizeButton(_next, side, Math.Round(side * 0.46));
+        var sides = settings.Controls == ControlsLayout.All ? Visibility.Visible : Visibility.Collapsed;
+        _prev.Visibility = sides;
+        _next.Visibility = sides;
+        _controls.Visibility = settings.Controls == ControlsLayout.None ? Visibility.Collapsed : Visibility.Visible;
+
+        _topLine.Inner.FontSize = settings.TitleFontSize;
+        _topLine.Visibility = settings.ShowTopLine ? Visibility.Visible : Visibility.Collapsed;
+        _bigTitle.Inner.FontSize = settings.LyricFontSize;
+        _lyricBase.FontSize = settings.LyricFontSize;
+        _lyricFill.FontSize = settings.LyricFontSize;
+        _lyricCanvas.Height = Math.Ceiling(settings.LyricFontSize * 1.35);
+        _text.Spacing = settings.ShowTopLine ? 1 : 0;
+    }
+
+    private static void SizeButton(Button button, double size, double iconSize)
+    {
+        button.Width = button.Height = size;
+        button.CornerRadius = new CornerRadius(size / 2);
+        if (button.Content is FontIcon icon) icon.FontSize = iconSize;
     }
 
     /// <summary>Pause marquee animations while another smart-stack member is shown.</summary>
