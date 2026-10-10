@@ -1,7 +1,7 @@
-# Lyrics Player（WidBar 歌词控件）
+﻿# Lyrics Player（WidBar 歌词控件）
 
 任务栏上显示「当前播放歌曲 + 逐字高亮的歌词」，带上一首 / 播放暂停 / 下一首。
-点开弹出面板是完整的滚动歌词（可点任意一句跳转）、进度条和翻译。
+点开弹出面板是完整的滚动歌词卡片（可点任意一句跳转）、单曲歌词偏移（－/＋ 每次 0.5 秒，只对这首歌生效，点中间数值归零）、进度条，以及随机 / 上一首 / 播放暂停 / 下一首 / 循环按钮（播放器不支持随机或循环时按钮会变灰）。
 
 它不自己播放音乐，而是跟随 Windows 系统媒体会话（SMTC），所以网易云音乐、QQ音乐、
 酷狗、Spotify、Apple Music、foobar2000、浏览器里的网页播放器都能用。
@@ -18,7 +18,8 @@ LyricsPlayer.ExtensionApp/
   Lyrics/LyricsService.cs  歌词查找：网易云 + LRCLIB，按歌名/歌手/时长打分，磁盘缓存
   Views/MarqueeText.cs     放不下时来回滚动的单行文字
   Views/PreviewView.cs     任务栏预览（封面、歌名-歌手、卡拉OK擦除效果的歌词、按钮）
-  Views/FlyoutView.cs      弹出面板（滚动歌词、进度条、控制）
+  Views/FlyoutView.cs      弹出面板（歌词卡片、单曲偏移、进度条、随机/循环/播放控制）
+  Lyrics/SongOffsets.cs    单曲歌词偏移，存在 song-offsets.json
   Views/SettingsView.cs    设置页
 LyricsPlayer (Package)/    MSIX 打包项目
 ```
@@ -34,7 +35,7 @@ LyricsPlayer (Package)/    MSIX 打包项目
 - 中文/日文/韩文歌名先查网易云音乐（带翻译），其他先查 LRCLIB，查不到再换另一个。
 - 用歌名（去掉括号和 "- Remastered" 之类后缀）、歌手、时长打分，避免匹配到翻唱或现场版。
 - 结果缓存在 WidBar 给插件的 DataDirectory 下 `lyrics-cache/`，找不到的歌一天后重试。
-- 匹配错了点弹出面板右上角的刷新按钮重新获取。
+- 匹配错了点弹出面板右上角的“歌词”按钮重新获取。
 
 ## 设置
 

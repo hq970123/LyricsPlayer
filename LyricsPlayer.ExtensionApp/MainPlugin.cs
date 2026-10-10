@@ -21,8 +21,8 @@ public sealed class MainPlugin :
 
     public override int PreviewLogicalWidth => _settings.PreviewWidth;
     public override bool IsPreviewVisible => !_settings.HideWhenIdle || (_media?.HasSession ?? false);
-    public override int FlyoutWidth => 380;
-    public override int FlyoutHeight => 540;
+    public override int FlyoutWidth => 420;
+    public override int FlyoutHeight => 420;
     public override WidgetFlyoutBackdrop FlyoutBackdrop => WidgetFlyoutBackdrop.Acrylic;
 
     private WidgetSettings _settings = new();
@@ -39,6 +39,7 @@ public sealed class MainPlugin :
     private LyricsStatus _status = LyricsStatus.Idle;
     private string? _lyricsForKey;
     private CancellationTokenSource? _lyricsCts;
+    private SongOffsets? _songOffsets;
 
     public override async Task InitializeAsync(IWidgetContext context)
     {
@@ -46,6 +47,7 @@ public sealed class MainPlugin :
         await base.InitializeAsync(context);
 
         _lyricsService = new LyricsService(context.DataDirectory);
+        _songOffsets = new SongOffsets(context.DataDirectory);
         ApplyProviderSettings();
 
         var ui = DispatcherQueue.GetForCurrentThread();
@@ -83,7 +85,7 @@ public sealed class MainPlugin :
     public override UIElement? CreateFlyoutContent()
     {
         if (_media is null) return null;
-        _flyout = new FlyoutView(_media, RefetchLyrics);
+        _flyout = new FlyoutView(_media, RefetchLyrics, NudgeSongOffset);
         Render();
         return _flyout;
     }
@@ -131,6 +133,19 @@ public sealed class MainPlugin :
         }
         Render();
         UpdateVisibility();
+    }
+
+    private string? SongKey => _media?.Track is { } t ? $"{t.Title}\u001f{t.Artist}" : null;
+
+    private int SongOffsetMs => SongKey is { } key ? _songOffsets?.Get(key) ?? 0 : 0;
+
+    /// <summary>Flyout -/+: shift this song's lyrics; 0 resets it.</summary>
+    private void NudgeSongOffset(int deltaMs)
+    {
+        if (SongKey is not { } key || _songOffsets is null) return;
+        var value = deltaMs == 0 ? 0 : Math.Clamp(_songOffsets.Get(key) + deltaMs, -10_000, 10_000);
+        _songOffsets.Set(key, value);
+        Render();
     }
 
     private void RefetchLyrics() => _ = LoadLyricsAsync(_media?.Track, refetch: true);
@@ -192,7 +207,7 @@ public sealed class MainPlugin :
         var media = _media;
         var track = media?.Track;
         var position = media?.GetPosition() ?? TimeSpan.Zero;
-        var lyricPos = position + TimeSpan.FromMilliseconds(_settings.OffsetMs);
+        var lyricPos = position + TimeSpan.FromMilliseconds(_settings.OffsetMs + SongOffsetMs);
         var index = _lyrics.IndexAt(lyricPos);
         var progress = _lyrics.ProgressAt(index, lyricPos, track?.Duration ?? TimeSpan.Zero);
         return new PlayerSnapshot(track, media?.IsPlaying ?? false, media?.CanSeek ?? false,
@@ -204,7 +219,7 @@ public sealed class MainPlugin :
         if (_preview is null && _flyout is null) return;
         var snap = Snapshot();
         if (_preview is not null && _previewOnTop) _preview.Render(snap, _settings);
-        if (_flyout is not null && _flyoutShown) _flyout.Render(snap, _settings);
+        if (_flyout is not null && _flyoutShown) _flyout.Render(snap, _settings, SongOffsetMs);
     }
 
     /// <summary>Tick only while something on screen is moving.</summary>

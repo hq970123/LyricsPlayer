@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Microsoft.UI.Dispatching;
 using Windows.Media.Control;
 
@@ -41,6 +41,10 @@ public sealed class MediaSessionWatcher : IDisposable
     public bool IsPlaying { get; private set; }
     public bool HasSession => _session is not null && Track is not null;
     public bool CanSeek { get; private set; }
+    public bool CanShuffle { get; private set; }
+    public bool IsShuffleOn { get; private set; }
+    public bool CanRepeat { get; private set; }
+    public Windows.Media.MediaPlaybackAutoRepeatMode RepeatMode { get; private set; }
 
     /// <summary>Title, artist or cover changed.</summary>
     public event EventHandler? TrackChanged;
@@ -202,6 +206,10 @@ public sealed class MediaSessionWatcher : IDisposable
         var info = _session?.GetPlaybackInfo();
         var playing = info?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
         CanSeek = info?.Controls?.IsPlaybackPositionEnabled == true;
+        CanShuffle = info?.Controls?.IsShuffleEnabled == true;
+        IsShuffleOn = info?.IsShuffleActive == true;
+        CanRepeat = info?.Controls?.IsRepeatEnabled == true;
+        RepeatMode = info?.AutoRepeatMode ?? Windows.Media.MediaPlaybackAutoRepeatMode.None;
 
         if (playing != IsPlaying)
         {
@@ -262,6 +270,23 @@ public sealed class MediaSessionWatcher : IDisposable
     public async void Previous()
     {
         try { if (_session is not null) await _session.TrySkipPreviousAsync(); } catch { }
+    }
+
+    public async void ToggleShuffle()
+    {
+        try { if (_session is not null) await _session.TryChangeShuffleActiveAsync(!IsShuffleOn); } catch { }
+    }
+
+    /// <summary>Off → whole list → one song → off.</summary>
+    public async void CycleRepeat()
+    {
+        var next = RepeatMode switch
+        {
+            Windows.Media.MediaPlaybackAutoRepeatMode.None => Windows.Media.MediaPlaybackAutoRepeatMode.List,
+            Windows.Media.MediaPlaybackAutoRepeatMode.List => Windows.Media.MediaPlaybackAutoRepeatMode.Track,
+            _ => Windows.Media.MediaPlaybackAutoRepeatMode.None,
+        };
+        try { if (_session is not null) await _session.TryChangeAutoRepeatModeAsync(next); } catch { }
     }
 
     public async void Seek(TimeSpan position)

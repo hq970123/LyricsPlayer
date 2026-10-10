@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices.WindowsRuntime;
+﻿using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -16,9 +16,14 @@ internal static class UiHelpers
     public const string GlyphPause = "\uE769";
     public const string GlyphMusic = "\uE8D6";
     public const string GlyphRefresh = "\uE72C";
+    public const string GlyphShuffle = "\uE8B1";
+    public const string GlyphRepeatAll = "\uE8EE";
+    public const string GlyphRepeatOne = "\uE8ED";
+    public const string GlyphMinus = "\uE738";
+    public const string GlyphAdd = "\uE710";
 
     /// <summary>A borderless icon button that keeps the theme's hover and pressed states.</summary>
-    public static Button IconButton(string glyph, double size, double iconSize, string tooltip, bool filled = false)
+    public static Button IconButton(string glyph, double size, double iconSize, string tooltip, bool filled = false, bool accent = false)
     {
         var button = new Button
         {
@@ -31,11 +36,15 @@ internal static class UiHelpers
             VerticalAlignment = VerticalAlignment.Center,
             Content = new FontIcon { Glyph = glyph, FontSize = iconSize },
         };
+        if (accent && Application.Current.Resources.TryGetValue("AccentButtonStyle", out var accentStyle) && accentStyle is Style style)
+        {
+            button.Style = style;
+        }
         var clear = new SolidColorBrush(Colors.Transparent);
         button.Resources["ButtonBorderBrush"] = clear;
         button.Resources["ButtonBorderBrushPointerOver"] = clear;
         button.Resources["ButtonBorderBrushPressed"] = clear;
-        if (!filled)
+        if (!filled && !accent)
         {
             button.Resources["ButtonBackground"] = clear;
         }
