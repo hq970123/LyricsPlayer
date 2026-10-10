@@ -26,7 +26,7 @@ public sealed class SettingsView : StackPanel
         var draft = _draft = WidgetSettings.FromJson(context.SettingsJson);
         _live = live;
         _actualWidth = actualWidth;
-        Spacing = 16;
+        Spacing = 12;
 
         // ---- Live sample of the taskbar slot, redrawn on every change below.
         _sample = new PreviewView(media);
@@ -52,7 +52,7 @@ public sealed class SettingsView : StackPanel
         };
         _widthNote = new TextBlock { FontSize = 12, Opacity = 0.6, TextWrapping = TextWrapping.Wrap };
 
-        var samplePanel = new StackPanel { Spacing = 6 };
+        var samplePanel = new StackPanel { Spacing = 4 };
         samplePanel.Children.Add(new TextBlock
         {
             Text = "效果预览",
@@ -75,60 +75,82 @@ public sealed class SettingsView : StackPanel
             Tick();
         }
 
-        Children.Add(Header("布局"));
-        Children.Add(IntSlider("任务栏宽度", "px", WidgetSettings.MinWidth, WidgetSettings.MaxWidth, 10,
+        // ---- Compact sections: one row per setting (label left, control right).
+                UIElement coverSizeRow = null!, titleSizeRow = null!, buttonSizeRow = null!;
+
+        var (layout, layoutCard) = Card("布局");
+        layout.Children.Add(SliderRow("任务栏宽度", "px", WidgetSettings.MinWidth, WidgetSettings.MaxWidth, 10,
             draft.PreviewWidth, v => { draft.PreviewWidth = v; Save(); }));
-        Children.Add(IntSlider("歌词字号", "", 10, 26, 1, draft.LyricFontSize, v => { draft.LyricFontSize = v; Save(); }));
-        Children.Add(Toggle("歌词上方显示歌名行（关闭后只显示一行歌词，字可以更大）", draft.ShowTopLine,
-            v => { draft.ShowTopLine = v; Save(); }));
-        Children.Add(IntSlider("歌名字号", "", 9, 20, 1, draft.TitleFontSize, v => { draft.TitleFontSize = v; Save(); }));
-        Children.Add(IntSlider("元素间距", "px", 0, 20, 1, draft.Spacing, v => { draft.Spacing = v; Save(); }));
+        layout.Children.Add(SliderRow("元素间距", "px", 0, 20, 1, draft.Spacing, v => { draft.Spacing = v; Save(); }));
+        layout.Children.Add(ToggleRow("显示专辑封面", draft.ShowAlbumArt, v =>
+        {
+            draft.ShowAlbumArt = v; Enable(coverSizeRow, v); Save();
+        }, out _));
+        layout.Children.Add(coverSizeRow = SliderRow("封面大小", "px", 20, 48, 2, draft.CoverSize, v => { draft.CoverSize = v; Save(); }));
 
-        Children.Add(Toggle("显示专辑封面", draft.ShowAlbumArt, v => { draft.ShowAlbumArt = v; Save(); }));
-        Children.Add(IntSlider("封面大小", "px", 20, 48, 2, draft.CoverSize, v => { draft.CoverSize = v; Save(); }));
-
-        var controls = new ComboBox { Header = "播放按钮", MinWidth = 220 };
-        controls.Items.Add("上一首 / 播放暂停 / 下一首");
-        controls.Items.Add("只显示播放暂停");
+        var controls = new ComboBox { MinWidth = 150, HorizontalAlignment = HorizontalAlignment.Right };
+        controls.Items.Add("全部按钮");
+        controls.Items.Add("只有播放暂停");
         controls.Items.Add("不显示");
         controls.SelectedIndex = (int)draft.Controls;
         controls.SelectionChanged += (_, _) =>
         {
             if (controls.SelectedIndex < 0) return;
             draft.Controls = (ControlsLayout)controls.SelectedIndex;
+            Enable(buttonSizeRow, draft.Controls != ControlsLayout.None);
             Save();
         };
-        Children.Add(controls);
-        Children.Add(IntSlider("按钮大小", "px", 24, 40, 2, draft.ButtonSize, v => { draft.ButtonSize = v; Save(); }));
+        layout.Children.Add(Row("播放按钮", controls));
+        layout.Children.Add(buttonSizeRow = SliderRow("按钮大小", "px", 24, 40, 2, draft.ButtonSize, v => { draft.ButtonSize = v; Save(); }));
+        Children.Add(layoutCard);
 
-        Children.Add(Header("显示"));
-        Children.Add(Toggle("有翻译时，第一行显示翻译（代替歌名）", draft.TranslationOnTopLine, v => { draft.TranslationOnTopLine = v; Save(); }));
-        Children.Add(Toggle("没在播放时从任务栏隐藏", draft.HideWhenIdle, v => { draft.HideWhenIdle = v; Save(); }));
-        Children.Add(Toggle("歌名过长时滚动显示", draft.ScrollLongTitle, v => { draft.ScrollLongTitle = v; Save(); }));
+        var (text, textCard) = Card("文字");
+        text.Children.Add(SliderRow("歌词字号", "", 10, 26, 1, draft.LyricFontSize, v => { draft.LyricFontSize = v; Save(); }));
+        text.Children.Add(ToggleRow("显示歌名行", draft.ShowTopLine, v =>
+        {
+            draft.ShowTopLine = v; Enable(titleSizeRow, v); Save();
+        }, out _, "关闭后只显示一行歌词，字可以更大"));
+        text.Children.Add(titleSizeRow = SliderRow("歌名字号", "", 9, 20, 1, draft.TitleFontSize, v => { draft.TitleFontSize = v; Save(); }));
+        text.Children.Add(ToggleRow("歌名过长时滚动", draft.ScrollLongTitle, v => { draft.ScrollLongTitle = v; Save(); }, out _));
+        text.Children.Add(ToggleRow("有翻译时歌名行显示翻译", draft.TranslationOnTopLine, v => { draft.TranslationOnTopLine = v; Save(); }, out _));
+        text.Children.Add(ColorRow("文字颜色", "歌名、歌手和还没唱到的歌词", draft.TextColor, v => { draft.TextColor = v; Save(); }));
+        text.Children.Add(ColorRow("高亮颜色", "正在唱的部分和弹出面板里的当前句", draft.HighlightColor, v => { draft.HighlightColor = v; Save(); }));
+        Children.Add(textCard);
 
-        Children.Add(Header("字体颜色"));
-        Children.Add(ColorRow("文字颜色", "歌名、歌手和还没唱到的歌词", draft.TextColor, v => { draft.TextColor = v; Save(); }));
-        Children.Add(ColorRow("歌词高亮色", "正在唱的部分，弹出面板里的当前句也用这个颜色", draft.HighlightColor, v => { draft.HighlightColor = v; Save(); }));
-
-        Children.Add(Header("歌词"));
-        Children.Add(Toggle("弹出面板显示翻译", draft.ShowTranslationInFlyout, v => { draft.ShowTranslationInFlyout = v; Save(); }));
-
+        var (lyrics, lyricsCard) = Card("歌词与行为");
+        var offsetValue = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Width = 64, TextAlignment = TextAlignment.Right, Opacity = 0.75 };
         var offset = new Slider
         {
-            Header = OffsetLabel(draft.OffsetMs),
-            Minimum = -3000, Maximum = 3000, StepFrequency = 100, Value = draft.OffsetMs,
+            Minimum = -3000, Maximum = 3000, StepFrequency = 100, SmallChange = 100, Value = draft.OffsetMs,
+            Width = 150, VerticalAlignment = VerticalAlignment.Center,
         };
+        offsetValue.Text = OffsetLabel(draft.OffsetMs);
         offset.ValueChanged += (_, e) =>
         {
             draft.OffsetMs = (int)e.NewValue;
-            offset.Header = OffsetLabel(draft.OffsetMs);
+            offsetValue.Text = OffsetLabel(draft.OffsetMs);
             Save();
         };
-        Children.Add(offset);
+        var offsetPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
+        offsetPanel.Children.Add(offset);
+        offsetPanel.Children.Add(offsetValue);
+        lyrics.Children.Add(Row("歌词偏移", offsetPanel, "歌词比歌声慢就往右（提前）"));
+        lyrics.Children.Add(ToggleRow("弹出面板显示翻译", draft.ShowTranslationInFlyout, v => { draft.ShowTranslationInFlyout = v; Save(); }, out _));
+        lyrics.Children.Add(ToggleRow("没在播放时隐藏控件", draft.HideWhenIdle, v => { draft.HideWhenIdle = v; Save(); }, out _));
 
-        Children.Add(Header("歌词来源"));
-        Children.Add(Toggle("网易云音乐（中文歌优先）", draft.UseNetease, v => { draft.UseNetease = v; Save(); }));
-        Children.Add(Toggle("LRCLIB（开源歌词库，英文歌优先）", draft.UseLrclib, v => { draft.UseLrclib = v; Save(); }));
+        var netease = new CheckBox { Content = "网易云", IsChecked = draft.UseNetease, MinWidth = 0 };
+        netease.Click += (_, _) => { draft.UseNetease = netease.IsChecked == true; Save(); };
+        var lrclib = new CheckBox { Content = "LRCLIB", IsChecked = draft.UseLrclib, MinWidth = 0 };
+        lrclib.Click += (_, _) => { draft.UseLrclib = lrclib.IsChecked == true; Save(); };
+        var sources = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, HorizontalAlignment = HorizontalAlignment.Right };
+        sources.Children.Add(netease);
+        sources.Children.Add(lrclib);
+        lyrics.Children.Add(Row("歌词来源", sources, "网易云中文歌更全，LRCLIB 英文歌更全"));
+        Children.Add(lyricsCard);
+
+        Enable(coverSizeRow, draft.ShowAlbumArt);
+        Enable(titleSizeRow, draft.ShowTopLine);
+        Enable(buttonSizeRow, draft.Controls != ControlsLayout.None);
     }
 
     /// <summary>One frame of the sample: the real song when something is playing, otherwise demo lyrics.</summary>
@@ -160,23 +182,6 @@ public sealed class SettingsView : StackPanel
             LyricsStatus.Found, 0, progress);
     }
 
-    private static UIElement IntSlider(string label, string unit, int min, int max, int step, int value, Action<int> changed)
-    {
-        string Caption(int v) => $"{label}：{v}{unit}";
-        var slider = new Slider
-        {
-            Header = Caption(value),
-            Minimum = min, Maximum = max, StepFrequency = step, SmallChange = step, Value = value,
-        };
-        slider.ValueChanged += (_, e) =>
-        {
-            var v = (int)Math.Round(e.NewValue);
-            slider.Header = Caption(v);
-            changed(v);
-        };
-        return slider;
-    }
-
     private static Brush? ThemeBrush(string key) =>
         Application.Current.Resources.TryGetValue(key, out var value) ? value as Brush : null;
 
@@ -187,12 +192,92 @@ public sealed class SettingsView : StackPanel
         _ => $"歌词偏移：延后 {-ms / 1000.0:0.0} 秒",
     };
 
-    private static TextBlock Header(string text) => new()
+    /// <summary>A titled card: returns the panel rows go into, and the card to add to the page.</summary>
+    private static (StackPanel Rows, UIElement Card) Card(string title)
     {
-        Text = text,
-        Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"],
-        Margin = new Thickness(0, 8, 0, -8),
-    };
+        var rows = new StackPanel();
+        var outer = new StackPanel { Spacing = 4 };
+        outer.Children.Add(new TextBlock
+        {
+            Text = title,
+            Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"],
+            Margin = new Thickness(2, 0, 0, 0),
+        });
+        outer.Children.Add(new Border
+        {
+            Background = ThemeBrush("CardBackgroundFillColorDefaultBrush"),
+            BorderBrush = ThemeBrush("CardStrokeColorDefaultBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(12, 2, 8, 2),
+            Child = rows,
+        });
+        return (rows, outer);
+    }
+
+    /// <summary>Label (with optional hint as tooltip) on the left, control on the right; ~36px tall.</summary>
+    private static Grid Row(string label, FrameworkElement control, string? hint = null)
+    {
+        var g = new Grid { MinHeight = 36, ColumnSpacing = 12 };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var t = new TextBlock
+        {
+            Text = label, VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        if (hint is not null)
+        {
+            ToolTipService.SetToolTip(t, hint);
+            t.Text = label + "  ⓘ";
+        }
+        g.Children.Add(t);
+        control.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(control, 1);
+        g.Children.Add(control);
+        return g;
+    }
+
+    private static Grid SliderRow(string label, string unit, int min, int max, int step, int value, Action<int> changed)
+    {
+        var valueText = new TextBlock
+        {
+            Text = $"{value}{unit}", Width = 52, TextAlignment = TextAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center, Opacity = 0.75,
+        };
+        var slider = new Slider
+        {
+            Minimum = min, Maximum = max, StepFrequency = step, SmallChange = step, Value = value,
+            Width = 150, VerticalAlignment = VerticalAlignment.Center,
+        };
+        slider.ValueChanged += (_, e) =>
+        {
+            var v = (int)Math.Round(e.NewValue);
+            valueText.Text = $"{v}{unit}";
+            changed(v);
+        };
+        var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        panel.Children.Add(slider);
+        panel.Children.Add(valueText);
+        return Row(label, panel);
+    }
+
+    private static Grid ToggleRow(string label, bool value, Action<bool> changed, out ToggleSwitch toggle, string? hint = null)
+    {
+        var t = toggle = new ToggleSwitch
+        {
+            IsOn = value, OnContent = null, OffContent = null, MinWidth = 0,
+            HorizontalAlignment = HorizontalAlignment.Right,
+        };
+        t.Toggled += (_, _) => changed(t.IsOn);
+        return Row(label, t, hint);
+    }
+
+    private static void Enable(UIElement row, bool on)
+    {
+        row.Opacity = on ? 1.0 : 0.4;
+        row.IsHitTestVisible = on;
+    }
 
     private static readonly string[] Presets =
     {
@@ -203,15 +288,15 @@ public sealed class SettingsView : StackPanel
     /// A color setting: label, a swatch button that opens a full color picker with presets,
     /// and a "跟随系统" button that clears the custom color (back to the Windows theme).
     /// </summary>
-    private static UIElement ColorRow(string label, string description, string? current, Action<string?> changed)
+    private static Grid ColorRow(string label, string description, string? current, Action<string?> changed)
     {
         var swatch = new Border
         {
-            Width = 20, Height = 20, CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(1),
+            Width = 16, Height = 16, CornerRadius = new CornerRadius(3), BorderThickness = new Thickness(1),
             BorderBrush = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x40, 0x80, 0x80, 0x80)),
         };
         var hexText = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontFamily = new FontFamily("Consolas") };
-        var buttonContent = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var buttonContent = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         buttonContent.Children.Add(swatch);
         buttonContent.Children.Add(hexText);
 
@@ -259,7 +344,8 @@ public sealed class SettingsView : StackPanel
 
         var button = new DropDownButton { Content = buttonContent, Flyout = new Flyout { Content = pickerPanel } };
 
-        var reset = new HyperlinkButton { Content = "跟随系统", VerticalAlignment = VerticalAlignment.Center };
+        var reset = new HyperlinkButton { Content = "重置", Padding = new Thickness(6, 2, 6, 2), VerticalAlignment = VerticalAlignment.Center };
+        ToolTipService.SetToolTip(reset, "跟随系统颜色");
         reset.Click += (_, _) =>
         {
             suppress = true;
@@ -269,21 +355,9 @@ public sealed class SettingsView : StackPanel
             changed(null);
         };
 
-        var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, HorizontalAlignment = HorizontalAlignment.Right };
         controls.Children.Add(button);
         controls.Children.Add(reset);
-
-        var panel = new StackPanel { Spacing = 4 };
-        panel.Children.Add(new TextBlock { Text = label });
-        panel.Children.Add(new TextBlock { Text = description, FontSize = 12, Opacity = 0.6, TextWrapping = TextWrapping.Wrap });
-        panel.Children.Add(controls);
-        return panel;
-    }
-
-    private static ToggleSwitch Toggle(string header, bool value, Action<bool> changed)
-    {
-        var t = new ToggleSwitch { Header = header, IsOn = value };
-        t.Toggled += (_, _) => changed(t.IsOn);
-        return t;
+        return Row(label, controls, description);
     }
 }
