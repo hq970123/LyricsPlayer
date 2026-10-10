@@ -68,11 +68,17 @@ public sealed class SettingsView : StackPanel
 
         void Save()
         {
-            context.SaveSettings(draft.ToJson());
-            context.RequestPreviewRefresh();
-            _sampleSlot.Width = draft.PreviewWidth;
-            _sample.ApplySettings(draft);
-            Tick();
+            try
+            {
+                context.SaveSettings(draft.ToJson()); // also pushes the draft to the taskbar preview
+                _sampleSlot.Width = draft.PreviewWidth;
+                _sample.ApplySettings(draft);
+                Tick();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"settings save failed: {ex}");
+            }
         }
 
         // ---- Compact sections: one row per setting (label left, control right).
@@ -155,6 +161,12 @@ public sealed class SettingsView : StackPanel
 
     /// <summary>One frame of the sample: the real song when something is playing, otherwise demo lyrics.</summary>
     private void Tick()
+    {
+        try { TickCore(); }
+        catch (Exception ex) { Debug.WriteLine($"settings preview failed: {ex}"); }
+    }
+
+    private void TickCore()
     {
         var snap = _live() ?? DemoSnapshot();
         _sample.Render(snap, _draft);
@@ -281,24 +293,36 @@ public sealed class SettingsView : StackPanel
 
     private static readonly string[] Presets =
     {
-        "#FFFFFF", "#000000", "#31C27C", "#E60026", "#FF6B81", "#FFB300", "#4FC3F7", "#7C4DFF",
+        "#FFFFFF", "#D9D9D9", "#8C8C8C", "#000000", "#31C27C", "#1DB954", "#00BFA5", "#4FC3F7",
+        "#2979FF", "#7C4DFF", "#E040FB", "#FF6B81", "#E60026", "#FF7043", "#FFB300", "#FFEB3B",
     };
 
     /// <summary>
-    /// A color setting: label, a swatch button that opens a full color picker with presets,
-    /// and a "跟随系统" button that clears the custom color (back to the Windows theme).
+    /// A color setting: a swatch button opening a small picker (preset chips, hue / saturation /
+    /// brightness sliders and a hex box), and "重置" which goes back to the Windows theme.
+    /// Built from plain controls on purpose: WinUI's ColorPicker inside a Flyout is known to crash.
+    /// Changes are saved after a short pause so dragging a slider doesn't flood WidBar with drafts.
     /// </summary>
     private static Grid ColorRow(string label, string description, string? current, Action<string?> changed)
     {
         var swatch = new Border
         {
             Width = 16, Height = 16, CornerRadius = new CornerRadius(3), BorderThickness = new Thickness(1),
-            BorderBrush = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x40, 0x80, 0x80, 0x80)),
+            BorderBrush = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x60, 0x80, 0x80, 0x80)),
         };
         var hexText = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontFamily = new FontFamily("Consolas") };
         var buttonContent = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         buttonContent.Children.Add(swatch);
         buttonContent.Children.Add(hexText);
+
+        string? pending = current;
+        var debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
+        debounce.Tick += (_, _) =>
+        {
+            debounce.Stop();
+            try { changed(pending); }
+            catch (Exception ex) { Debug.WriteLine($"color save failed: {ex}"); }
+        };
 
         void Show(string? hex)
         {
@@ -308,56 +332,139 @@ public sealed class SettingsView : StackPanel
         }
         Show(current);
 
-        var picker = new ColorPicker
+        // ---- picker contents
+        var start = WidgetSettings.ParseColor(current) ?? Microsoft.UI.Colors.White;
+        RgbToHsv(start, out var h0, out var s0, out var v0);
+        var big = new Border { Height = 28, CornerRadius = new CornerRadius(4), Background = new SolidColorBrush(start) };
+        var hue = PickerSlider(0, 360, h0);
+        var sat = PickerSlider(0, 100, s0 * 100);
+        var val = PickerSlider(0, 100, v0 * 100);
+        var hexBox = new TextBox { Text = WidgetSettings.ToHex(start), Width = 96, FontFamily = new FontFamily("Consolas"), MaxLength = 7 };
+        bool syncing = false;
+
+        void Commit(Windows.UI.Color c, bool fromHexBox = false)
         {
-            IsAlphaEnabled = false,
-            IsMoreButtonVisible = false,
-            IsColorSliderVisible = true,
-            IsHexInputVisible = true,
-            Color = WidgetSettings.ParseColor(current) ?? Microsoft.UI.Colors.White,
-        };
-        bool suppress = false;
-        picker.ColorChanged += (_, e) =>
-        {
-            if (suppress) return;
-            var hex = WidgetSettings.ToHex(e.NewColor);
+            var hex = WidgetSettings.ToHex(c);
+            big.Background = new SolidColorBrush(c);
+            if (!fromHexBox) hexBox.Text = hex;
             Show(hex);
-            changed(hex);
+            pending = hex;
+            debounce.Stop();
+            debounce.Start();
+        }
+
+        void FromSliders()
+        {
+            if (syncing) return;
+            Commit(HsvToRgb(hue.Value, sat.Value / 100, val.Value / 100));
+        }
+        hue.ValueChanged += (_, _) => FromSliders();
+        sat.ValueChanged += (_, _) => FromSliders();
+        val.ValueChanged += (_, _) => FromSliders();
+
+        void SetSliders(Windows.UI.Color c)
+        {
+            syncing = true;
+            RgbToHsv(c, out var h, out var sv, out var vv);
+            hue.Value = h; sat.Value = sv * 100; val.Value = vv * 100;
+            syncing = false;
+        }
+
+        hexBox.TextChanged += (_, _) =>
+        {
+            if (syncing) return;
+            var t = hexBox.Text.Trim();
+            if (!t.StartsWith('#')) t = "#" + t;
+            if (t.Length != 7 || WidgetSettings.ParseColor(t) is not { } c) return;
+            SetSliders(c);
+            Commit(c, fromHexBox: true);
         };
 
-        var presets = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        var chips = new VariableSizedWrapGrid { Orientation = Orientation.Horizontal, MaximumRowsOrColumns = 8, ItemWidth = 28, ItemHeight = 28 };
         foreach (var p in Presets)
         {
             var color = WidgetSettings.ParseColor(p)!.Value;
             var chip = new Button
             {
-                Width = 24, Height = 24, Padding = new Thickness(0), CornerRadius = new CornerRadius(12),
-                Background = new SolidColorBrush(color),
+                Width = 22, Height = 22, MinWidth = 0, MinHeight = 0, Padding = new Thickness(0),
+                CornerRadius = new CornerRadius(11), Background = new SolidColorBrush(color),
+                BorderBrush = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x60, 0x80, 0x80, 0x80)),
             };
-            chip.Click += (_, _) => picker.Color = color; // ColorChanged saves it
-            presets.Children.Add(chip);
+            ToolTipService.SetToolTip(chip, p);
+            chip.Click += (_, _) => { SetSliders(color); Commit(color); };
+            chips.Children.Add(chip);
         }
 
-        var pickerPanel = new StackPanel { Spacing = 12, Padding = new Thickness(4) };
-        pickerPanel.Children.Add(presets);
-        pickerPanel.Children.Add(picker);
+        var form = new StackPanel { Spacing = 6, Width = 240 };
+        form.Children.Add(big);
+        form.Children.Add(chips);
+        form.Children.Add(Labeled("色相", hue));
+        form.Children.Add(Labeled("饱和", sat));
+        form.Children.Add(Labeled("亮度", val));
+        form.Children.Add(Labeled("HEX", hexBox));
 
-        var button = new DropDownButton { Content = buttonContent, Flyout = new Flyout { Content = pickerPanel } };
+        var button = new DropDownButton { Content = buttonContent, Padding = new Thickness(8, 4, 8, 4), Flyout = new Flyout { Content = form } };
 
         var reset = new HyperlinkButton { Content = "重置", Padding = new Thickness(6, 2, 6, 2), VerticalAlignment = VerticalAlignment.Center };
         ToolTipService.SetToolTip(reset, "跟随系统颜色");
         reset.Click += (_, _) =>
         {
-            suppress = true;
-            picker.Color = Microsoft.UI.Colors.White;
-            suppress = false;
             Show(null);
-            changed(null);
+            pending = null;
+            debounce.Stop();
+            debounce.Start();
         };
 
         var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, HorizontalAlignment = HorizontalAlignment.Right };
         controls.Children.Add(button);
         controls.Children.Add(reset);
         return Row(label, controls, description);
+    }
+
+    private static Slider PickerSlider(double min, double max, double value) => new()
+    {
+        Minimum = min, Maximum = max, StepFrequency = 1, Value = value, VerticalAlignment = VerticalAlignment.Center,
+    };
+
+    private static Grid Labeled(string label, FrameworkElement control)
+    {
+        var g = new Grid { ColumnSpacing = 8 };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        g.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Opacity = 0.75 });
+        control.HorizontalAlignment = control is Slider ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
+        Grid.SetColumn(control, 1);
+        g.Children.Add(control);
+        return g;
+    }
+
+    private static void RgbToHsv(Windows.UI.Color c, out double h, out double s, out double v)
+    {
+        double r = c.R / 255.0, g = c.G / 255.0, b = c.B / 255.0;
+        double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b)), d = max - min;
+        v = max;
+        s = max <= 0 ? 0 : d / max;
+        if (d <= 0) { h = 0; return; }
+        if (max == r) h = 60 * (((g - b) / d) % 6);
+        else if (max == g) h = 60 * (((b - r) / d) + 2);
+        else h = 60 * (((r - g) / d) + 4);
+        if (h < 0) h += 360;
+    }
+
+    private static Windows.UI.Color HsvToRgb(double h, double s, double v)
+    {
+        h = ((h % 360) + 360) % 360;
+        double c = v * s, x = c * (1 - Math.Abs((h / 60) % 2 - 1)), m = v - c;
+        (double r, double g, double b) = h switch
+        {
+            < 60 => (c, x, 0d),
+            < 120 => (x, c, 0d),
+            < 180 => (0d, c, x),
+            < 240 => (0d, x, c),
+            < 300 => (x, 0d, c),
+            _ => (c, 0d, x),
+        };
+        static byte B(double f) => (byte)Math.Clamp(Math.Round(f * 255), 0, 255);
+        return Windows.UI.Color.FromArgb(255, B(r + m), B(g + m), B(b + m));
     }
 }
