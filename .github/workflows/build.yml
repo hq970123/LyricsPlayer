@@ -1,0 +1,148 @@
+name: Build installer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+env:
+  SOLUTION: LyricsPlayer.sln
+  CONFIGURATION: Release
+  PUBLISHER: CN=hq970123
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x64
+            runtime: win-x64
+          - platform: ARM64
+            runtime: win-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Stamp version
+        shell: pwsh
+        run: |
+          $m = 'LyricsPlayer (Package)/Package.appxmanifest'
+          (Get-Content $m -Raw) -replace 'Version="1\.0\.0\.0"', 'Version="1.0.${{ github.run_number }}.0"' | Set-Content $m -Encoding utf8
+
+      - name: Restore
+        run: >-
+          msbuild "$env:SOLUTION" /t:Restore
+          /p:Configuration=$env:CONFIGURATION
+          /p:Platform=${{ matrix.platform }}
+          /p:RuntimeIdentifier=${{ matrix.runtime }}
+          "/flp:logfile=restore.log;verbosity=minimal"
+
+      - name: Build
+        run: >-
+          msbuild "$env:SOLUTION" /m
+          /p:Configuration=$env:CONFIGURATION
+          /p:Platform=${{ matrix.platform }}
+          /p:RuntimeIdentifier=${{ matrix.runtime }}
+          /p:GenerateAppxPackageOnBuild=true
+          /p:AppxPackageSigningEnabled=false
+          /p:AppxBundle=Never
+          "/p:AppxPackageDir=$env:RUNNER_TEMP\AppPackages\"
+          "/flp:logfile=build.log;verbosity=minimal"
+
+      - name: Sign and stage installer
+        shell: pwsh
+        run: |
+          $platform = '${{ matrix.platform }}'
+          $out = Join-Path $env:RUNNER_TEMP "LyricsPlayer-$platform"
+          New-Item -ItemType Directory -Force $out | Out-Null
+
+          $msix = Get-ChildItem "$env:RUNNER_TEMP\AppPackages" -Recurse -Filter *.msix |
+            Where-Object { $_.FullName -notmatch '\\Dependencies\\' } | Select-Object -First 1
+          if (-not $msix) { throw 'No .msix produced' }
+          Write-Host "Package: $($msix.FullName)"
+
+          # Self-signed code-signing cert whose subject matches the manifest Publisher
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $env:PUBLISHER -KeyUsage DigitalSignature `
+            -FriendlyName 'Lyrics Player' -CertStoreLocation Cert:\CurrentUser\My `
+            -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}') -NotAfter (Get-Date).AddYears(5)
+          $pwd = ConvertTo-SecureString -String ([guid]::NewGuid().ToString()) -Force -AsPlainText
+          $pfx = Join-Path $env:RUNNER_TEMP 'sign.pfx'
+          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $pwd | Out-Null
+          Export-Certificate -Cert $cert -FilePath (Join-Path $out 'LyricsPlayer.cer') | Out-Null
+
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' |
+            Sort-Object FullName | Select-Object -Last 1
+          $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($pwd))
+          $dest = Join-Path $out "LyricsPlayer_$platform.msix"
+          Copy-Item $msix.FullName $dest
+          & $signtool.FullName sign /fd SHA256 /f $pfx /p $plain $dest
+          if ($LASTEXITCODE -ne 0) { throw 'signtool failed' }
+
+          # Windows App Runtime framework packages, in case the PC doesn't have them yet
+          $deps = Get-ChildItem "$env:RUNNER_TEMP\AppPackages" -Recurse -Directory -Filter Dependencies | Select-Object -First 1
+          if ($deps) {
+            $archDir = Get-ChildItem $deps.FullName -Directory | Where-Object Name -ieq $platform | Select-Object -First 1
+            if ($archDir) {
+              New-Item -ItemType Directory -Force (Join-Path $out 'Dependencies') | Out-Null
+              Copy-Item "$($archDir.FullName)\*" (Join-Path $out 'Dependencies') -Recurse
+            }
+          }
+
+          Copy-Item installer\Install.ps1, installer\Install.bat $out
+          Compress-Archive -Path "$out\*" -DestinationPath (Join-Path $env:RUNNER_TEMP "LyricsPlayer-$platform.zip") -Force
+          Get-ChildItem $out -Recurse -File | ForEach-Object { Write-Host "$($_.Name)  $([math]::Round($_.Length/1MB,2)) MB" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LyricsPlayer-${{ matrix.platform }}
+          path: ${{ runner.temp }}/LyricsPlayer-${{ matrix.platform }}.zip
+          if-no-files-found: error
+
+      - name: Report build errors as an issue
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $lines = @()
+          foreach ($f in 'restore.log', 'build.log') {
+            if (Test-Path $f) { $lines += Get-Content $f | Where-Object { $_ -match ': error |error [A-Z]+\d+|Exception' } }
+          }
+          $lines = $lines | Select-Object -Unique | Select-Object -First 80
+          if (-not $lines) { $lines = @('No compiler errors found in the logs; a later step failed. See the run log.') }
+          $body = "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`nCommit: ${{ github.sha }}`nPlatform: ${{ matrix.platform }}`n`n``````n" + ($lines -join "`n") + "`n``````"
+          $body | Out-File -Encoding utf8 errors.md
+          gh issue create --repo "${{ github.repository }}" --title "Build failed: ${{ matrix.platform }} #${{ github.run_number }}" --body-file errors.md
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "build-${{ github.run_number }}" assets/*.zip
+          --repo "${{ github.repository }}"
+          --target "${{ github.sha }}"
+          --title "Lyrics Player build ${{ github.run_number }}"
+          --notes "解压对应架构的 zip（大多数电脑用 x64），双击 Install.bat 即可安装。"

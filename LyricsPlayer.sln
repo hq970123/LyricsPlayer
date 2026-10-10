@@ -1,0 +1,41 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LyricsPlayer.ExtensionApp", "LyricsPlayer.ExtensionApp\LyricsPlayer.ExtensionApp.csproj", "{36C0DAFC-9C86-4C3F-8053-2AEDBE2726E1}"
+EndProject
+Project("{C7167F0D-BC9F-4E6E-AFE1-012C56B48DB5}") = "LyricsPlayer (Package)", "LyricsPlayer (Package)\LyricsPlayer (Package).wapproj", "{B806C67B-AA43-4147-9C03-E49B3287B28A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|ARM64 = Debug|ARM64
+		Debug|x64 = Debug|x64
+		Release|ARM64 = Release|ARM64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{36C0DAFC-9C86-4C3F-8053-2AEDBE2726E1}.Debug|ARM64.ActiveCfg = Debug|ARM64
+		{36C0DAFC-9C86-4C3F-8053-2AEDBE2726E1}.Debug|ARM64.Build.0 = Debug|ARM64
+		{36C0DAFC-9C86-4C3F-8053-2AEDBE2726E1}.Debug|x64.ActiveCfg = Debug|x64
+		{36C0DAFC-9C86-4C3F-8053-2AEDBE2726E1}.Debug|x64.Build.0 = Debug|x64
+		{36C0DAFC-9C86-4C3F-8053-2AEDBE2726E1}.Release|ARM64.ActiveCfg = Release|ARM64
+		{36C0DAFC-9C86-4C3F-8053-2AEDBE2726E1}.Release|ARM64.Build.0 = Release|ARM64
+		{36C0DAFC-9C86-4C3F-8053-2AEDBE2726E1}.Release|x64.ActiveCfg = Release|x64
+		{36C0DAFC-9C86-4C3F-8053-2AEDBE2726E1}.Release|x64.Build.0 = Release|x64
+		{B806C67B-AA43-4147-9C03-E49B3287B28A}.Debug|ARM64.ActiveCfg = Debug|ARM64
+		{B806C67B-AA43-4147-9C03-E49B3287B28A}.Debug|ARM64.Build.0 = Debug|ARM64
+		{B806C67B-AA43-4147-9C03-E49B3287B28A}.Debug|ARM64.Deploy.0 = Debug|ARM64
+		{B806C67B-AA43-4147-9C03-E49B3287B28A}.Debug|x64.ActiveCfg = Debug|x64
+		{B806C67B-AA43-4147-9C03-E49B3287B28A}.Debug|x64.Build.0 = Debug|x64
+		{B806C67B-AA43-4147-9C03-E49B3287B28A}.Debug|x64.Deploy.0 = Debug|x64
+		{B806C67B-AA43-4147-9C03-E49B3287B28A}.Release|ARM64.ActiveCfg = Release|ARM64
+		{B806C67B-AA43-4147-9C03-E49B3287B28A}.Release|ARM64.Build.0 = Release|ARM64
+		{B806C67B-AA43-4147-9C03-E49B3287B28A}.Release|ARM64.Deploy.0 = Release|ARM64
+		{B806C67B-AA43-4147-9C03-E49B3287B28A}.Release|x64.ActiveCfg = Release|x64
+		{B806C67B-AA43-4147-9C03-E49B3287B28A}.Release|x64.Build.0 = Release|x64
+		{B806C67B-AA43-4147-9C03-E49B3287B28A}.Release|x64.Deploy.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

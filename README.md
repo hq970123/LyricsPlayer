@@ -1,0 +1,55 @@
+# Lyrics Player（WidBar 歌词控件）
+
+任务栏上显示「当前播放歌曲 + 逐字高亮的歌词」，带上一首 / 播放暂停 / 下一首。
+点开弹出面板是完整的滚动歌词（可点任意一句跳转）、进度条和翻译。
+
+它不自己播放音乐，而是跟随 Windows 系统媒体会话（SMTC），所以网易云音乐、QQ音乐、
+酷狗、Spotify、Apple Music、foobar2000、浏览器里的网页播放器都能用。
+
+## 结构
+
+```text
+LyricsPlayer.ExtensionApp/
+  MainPlugin.cs            插件入口：串起媒体会话、歌词、定时刷新
+  WidgetSettings.cs        每个实例的设置（JSON）
+  PlayerSnapshot.cs        一帧渲染所需的全部状态
+  Media/MediaSessionWatcher.cs   监听 SMTC，插值计算播放位置，播放控制
+  Lyrics/LrcParser.cs      LRC 解析（多时间戳、[offset:]、翻译合并）
+  Lyrics/LyricsService.cs  歌词查找：网易云 + LRCLIB，按歌名/歌手/时长打分，磁盘缓存
+  Views/MarqueeText.cs     放不下时来回滚动的单行文字
+  Views/PreviewView.cs     任务栏预览（封面、歌名-歌手、卡拉OK擦除效果的歌词、按钮）
+  Views/FlyoutView.cs      弹出面板（滚动歌词、进度条、控制）
+  Views/SettingsView.cs    设置页
+LyricsPlayer (Package)/    MSIX 打包项目
+```
+
+## 构建运行
+
+1. Windows 11 + .NET 10 SDK + Visual Studio 2022（Windows 应用开发工作负载），打开开发者模式。
+2. 打开 `LyricsPlayer.sln`，把 `LyricsPlayer (Package)` 设为启动项目，`Debug | x64`，生成并部署。
+3. 打开 WidBar，在目录里找到 Lyrics Player 拖到任务栏。
+
+## 歌词来源与匹配
+
+- 中文/日文/韩文歌名先查网易云音乐（带翻译），其他先查 LRCLIB，查不到再换另一个。
+- 用歌名（去掉括号和 "- Remastered" 之类后缀）、歌手、时长打分，避免匹配到翻唱或现场版。
+- 结果缓存在 WidBar 给插件的 DataDirectory 下 `lyrics-cache/`，找不到的歌一天后重试。
+- 匹配错了点弹出面板右上角的刷新按钮重新获取。
+
+## 设置
+
+宽度（200–720px）、封面、控制按钮、第一行显示翻译、空闲时隐藏、歌名过长时滚动、
+字体颜色（文字颜色 + 歌词高亮色，带预设色和取色器，可一键恢复跟随系统）、面板翻译、
+歌词偏移（±3 秒）、歌词来源开关。
+
+- 文字颜色：歌名、歌手、还没唱到的歌词。只设它时，未唱部分是它的半透明。
+- 高亮色：正在唱的部分，弹出面板的当前句也用它。两个都设时按卡拉OK双色全不透明显示。
+- 滚动：任务栏和弹出面板里的歌名放不下时，停 2 秒后匀速滚到末尾，停 1.5 秒再回到开头；
+  长歌词则跟着唱的位置横向推进。控件被智能堆叠挡住或面板关闭时动画暂停。
+
+## 已知限制
+
+- 网易云接口是非官方接口，可能变动或限流；LRCLIB 偶尔 503，会自动换源且不缓存失败。
+- 不报告播放进度的播放器，会用本地计时器从切歌时开始计时，暂停/拖动进度后可能偏移，可用歌词偏移微调。
+- SMTC 没有「喜欢」接口，所以没做截图里的爱心按钮。
+- 逐字高亮按行内时间比例推算（LRC 只有行级时间）。

@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <UseWinUI>true</UseWinUI>
+    <WinUISDKReferences>false</WinUISDKReferences>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>LyricsPlayer.ExtensionApp</RootNamespace>
+    <AssemblyName>LyricsPlayer.ExtensionApp</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <!-- The .NET runtime ships inside the package, so the widget runs on a
+         machine that has no matching runtime installed. Note this alone is not
+         enough for MSIX: the packaging project honours the publish profile, so
+         SelfContained is set in Properties\PublishProfiles\*.pubxml as well. -->
+    <SelfContained>true</SelfContained>
+    <!-- The Windows App SDK stays framework-dependent: WidBar already brings
+         that runtime, and carrying a second copy only inflates the package. -->
+    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+  </PropertyGroup>
+
+  <!-- These properties feed the WidBar SDK build target, which writes
+       obj\widbar\plugin.json at build time. The packaging project picks that
+       file up, so id/name/version only live here. -->
+  <PropertyGroup>
+    <WidBarPluginId>com.hq970123.lyricsplayer</WidBarPluginId>
+    <WidBarPluginName>Lyrics Player</WidBarPluginName>
+    <WidBarPluginDescription>Shows synced lyrics for whatever is playing on Windows, with playback controls.</WidBarPluginDescription>
+    <WidBarPluginCategory>Media</WidBarPluginCategory>
+    <WidBarPluginVersion>1.0.0</WidBarPluginVersion>
+    <WidBarPluginPreviewWidth>240</WidBarPluginPreviewWidth>
+    <WidBarPluginConfigurable>true</WidBarPluginConfigurable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Manifest Include="$(ApplicationManifest)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
+    <PackageReference Include="WidBar.SDK" Version="2.0.5" />
+  </ItemGroup>
+
+</Project>
