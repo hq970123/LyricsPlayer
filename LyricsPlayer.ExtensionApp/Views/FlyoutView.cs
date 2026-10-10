@@ -1,4 +1,4 @@
-using LyricsPlayer.ExtensionApp.Lyrics;
+﻿using LyricsPlayer.ExtensionApp.Lyrics;
 using LyricsPlayer.ExtensionApp.Media;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -69,6 +69,8 @@ public sealed class FlyoutView : Grid
 
         var refresh = UiHelpers.IconButton(UiHelpers.GlyphRefresh, 32, 13, "重新获取歌词");
         refresh.VerticalAlignment = VerticalAlignment.Top;
+        // WidBar draws its own settings gear in the flyout's top-right corner; keep clear of it.
+        refresh.Margin = new Thickness(0, 0, 36, 0);
         refresh.Click += (_, _) => _refetchLyrics();
 
         var header = new Grid { ColumnSpacing = 14 };
