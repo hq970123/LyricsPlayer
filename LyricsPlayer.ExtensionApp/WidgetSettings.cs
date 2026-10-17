@@ -39,6 +39,14 @@ public sealed class WidgetSettings
     public bool ScrollLongTitle { get; set; } = true;
     /// <summary>Remove the widget from the taskbar when nothing is playing.</summary>
     public bool HideWhenIdle { get; set; }
+    /// <summary>Follow only the apps in FollowApps. Off (or an empty list) follows whatever Windows plays.</summary>
+    public bool FilterApps { get; set; }
+    /// <summary>Whitelisted media apps: AppUserModelId -> display name (kept so apps that aren't running still show).</summary>
+    public Dictionary<string, string> FollowApps { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The app ids the watcher should follow, or null for automatic.</summary>
+    public IEnumerable<string>? EffectiveFollowApps =>
+        FilterApps && FollowApps.Count > 0 ? FollowApps.Keys : null;
 
     public const int MinWidth = 160;
     public const int MaxWidth = 800;
@@ -64,6 +72,12 @@ public sealed class WidgetSettings
             s.TitleFontSize = Math.Clamp(s.TitleFontSize, 9, 20);
             s.LyricFontSize = Math.Clamp(s.LyricFontSize, 10, 26);
             s.OffsetMs = Math.Clamp(s.OffsetMs, -5000, 5000);
+            // JSON gives a case-sensitive dictionary (or null); ids are matched case-insensitively.
+            s.FollowApps = new Dictionary<string, string>(
+                (s.FollowApps ?? new()).Where(kv => !string.IsNullOrWhiteSpace(kv.Key))
+                    .GroupBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => g.First()),
+                StringComparer.OrdinalIgnoreCase);
             return s;
         }
         catch

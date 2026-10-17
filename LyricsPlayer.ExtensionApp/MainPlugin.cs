@@ -60,6 +60,7 @@ public sealed class MainPlugin :
 
         _previewOnTop = context.IsPreviewVisible;
         context.PreviewVisibilityChanged += OnPreviewVisibilityChanged;
+        _media.SetFilter(_settings.EffectiveFollowApps);
 
         try
         {
@@ -100,6 +101,7 @@ public sealed class MainPlugin :
     {
         _settings = WidgetSettings.FromJson(settingsJson);
         ApplyProviderSettings();
+        _media?.SetFilter(_settings.EffectiveFollowApps); // switches session right away
         _preview?.ApplySettings(_settings);
         Render();
         UpdateVisibility(force: true);

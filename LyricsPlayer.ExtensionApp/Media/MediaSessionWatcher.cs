@@ -16,6 +16,9 @@ public sealed record TrackInfo(
     public string Key => $"{Title}\u001f{Artist}\u001f{SourceAppId}";
 }
 
+/// <summary>A media app that has (or had) a system media session.</summary>
+public sealed record MediaAppInfo(string AppId, string Name, bool IsPlaying);
+
 /// <summary>
 /// Watches the Windows media session (SMTC), which every mainstream player feeds:
 /// NetEase Cloud Music, QQ Music, Spotify, Apple Music, foobar2000, browsers...
@@ -27,6 +30,12 @@ public sealed class MediaSessionWatcher : IDisposable
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private GlobalSystemMediaTransportControlsSession? _session;
     private bool _disposed;
+
+    // Optional whitelist of AppUserModelIds. Null or empty = follow whatever Windows plays.
+    private HashSet<string>? _allowed;
+    // Every session we listen to for play/pause, so a whitelisted app that starts playing
+    // in the background takes over even when Windows keeps another app "current".
+    private readonly List<GlobalSystemMediaTransportControlsSession> _watched = new();
 
     // Timeline state for position interpolation.
     private TimeSpan _reportedPosition;
@@ -50,40 +59,157 @@ public sealed class MediaSessionWatcher : IDisposable
     public event EventHandler? TrackChanged;
     /// <summary>Play/pause, timeline or session availability changed.</summary>
     public event EventHandler? StateChanged;
+    /// <summary>A media app opened or closed its session (used by the settings page list).</summary>
+    public event EventHandler? SessionsListChanged;
+
+    /// <summary>True when only whitelisted apps are followed.</summary>
+    public bool IsFiltering => _allowed is { Count: > 0 };
+
+    /// <summary>
+    /// Follow only these apps (AppUserModelIds, case-insensitive). Null or empty goes back to
+    /// automatic. Takes effect immediately.
+    /// </summary>
+    public void SetFilter(IEnumerable<string>? appIds)
+    {
+        var next = appIds?.Where(a => !string.IsNullOrWhiteSpace(a))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (next is { Count: 0 }) next = null;
+        if (next is null && _allowed is null) return;
+        if (next is not null && _allowed is not null && next.SetEquals(_allowed)) return;
+        _allowed = next;
+        if (_manager is not null) _ = RepickAsync();
+    }
+
+    private bool IsAllowed(GlobalSystemMediaTransportControlsSession s)
+    {
+        if (_allowed is null) return true;
+        try { return _allowed.Contains(s.SourceAppUserModelId ?? ""); }
+        catch { return false; }
+    }
+
+    /// <summary>The media apps that have a session right now.</summary>
+    public IReadOnlyList<MediaAppInfo> GetSessionApps()
+    {
+        var list = new List<MediaAppInfo>();
+        if (_manager is null) return list;
+        try
+        {
+            foreach (var s in _manager.GetSessions())
+            {
+                string id;
+                bool playing;
+                try
+                {
+                    id = s.SourceAppUserModelId ?? "";
+                    playing = s.GetPlaybackInfo()?.PlaybackStatus ==
+                              GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+                }
+                catch { continue; }
+                if (id.Length == 0) continue;
+                var existing = list.FindIndex(a => string.Equals(a.AppId, id, StringComparison.OrdinalIgnoreCase));
+                if (existing >= 0)
+                {
+                    if (playing) list[existing] = list[existing] with { IsPlaying = true };
+                    continue;
+                }
+                list.Add(new MediaAppInfo(id, AppNames.Friendly(id), playing));
+            }
+        }
+        catch { /* sessions can vanish mid-enumeration */ }
+        return list;
+    }
 
     public async Task StartAsync()
     {
         _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
         _manager.CurrentSessionChanged += OnCurrentSessionChanged;
-        _manager.SessionsChanged += OnCurrentSessionChanged;
+        _manager.SessionsChanged += OnSessionsChanged;
+        WatchAllSessions();
         await AttachAsync(PickSession());
     }
 
-    /// <summary>The playing session if there is one, otherwise whatever Windows calls current.</summary>
+    private static bool IsPlayingNow(GlobalSystemMediaTransportControlsSession s)
+    {
+        try
+        {
+            return s.GetPlaybackInfo()?.PlaybackStatus ==
+                   GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Among the allowed sessions: keep the current one while it plays, else take one that is
+    /// playing, else what Windows calls current, else any allowed (paused) session.
+    /// </summary>
     private GlobalSystemMediaTransportControlsSession? PickSession()
     {
         if (_manager is null) return null;
+        var candidates = new List<GlobalSystemMediaTransportControlsSession>();
+        try
+        {
+            foreach (var s in _manager.GetSessions())
+                if (IsAllowed(s)) candidates.Add(s);
+        }
+        catch { /* sessions can vanish mid-enumeration */ }
+
+        if (_session is not null && candidates.Contains(_session) && IsPlayingNow(_session)) return _session;
+        foreach (var s in candidates)
+            if (IsPlayingNow(s)) return s;
+
+        GlobalSystemMediaTransportControlsSession? current = null;
+        try { current = _manager.GetCurrentSession(); } catch { }
+        if (current is not null && IsAllowed(current)) return current;
+        if (_allowed is null) return current;
+
+        if (_session is not null && candidates.Contains(_session)) return _session;
+        return candidates.FirstOrDefault();
+    }
+
+    private async Task RepickAsync()
+    {
+        var next = PickSession();
+        if (!ReferenceEquals(next, _session)) await AttachAsync(next);
+    }
+
+    private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, object args) =>
+        _ui.TryEnqueue(async () => await RepickAsync());
+
+    private void OnSessionsChanged(GlobalSystemMediaTransportControlsSessionManager sender, object args) =>
+        _ui.TryEnqueue(async () =>
+        {
+            WatchAllSessions();
+            await RepickAsync();
+            SessionsListChanged?.Invoke(this, EventArgs.Empty);
+        });
+
+    /// <summary>Listen to play/pause on every session, not only the one we show.</summary>
+    private void WatchAllSessions()
+    {
+        foreach (var s in _watched)
+        {
+            try { s.PlaybackInfoChanged -= OnAnyPlaybackChanged; } catch { }
+        }
+        _watched.Clear();
+        if (_manager is null) return;
         try
         {
             foreach (var s in _manager.GetSessions())
             {
-                if (s.GetPlaybackInfo()?.PlaybackStatus ==
-                    GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
-                    return s;
+                s.PlaybackInfoChanged += OnAnyPlaybackChanged;
+                _watched.Add(s);
             }
         }
-        catch { /* sessions can vanish mid-enumeration */ }
-        return _manager.GetCurrentSession();
+        catch { }
     }
 
-    private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, object args)
-    {
+    private void OnAnyPlaybackChanged(GlobalSystemMediaTransportControlsSession s, PlaybackInfoChangedEventArgs e) =>
         _ui.TryEnqueue(async () =>
         {
-            var next = PickSession();
-            if (!ReferenceEquals(next, _session)) await AttachAsync(next);
+            if (ReferenceEquals(s, _session)) return; // handled by OnPlaybackInfoChanged
+            await RepickAsync();
+            SessionsListChanged?.Invoke(this, EventArgs.Empty);
         });
-    }
 
     private async Task AttachAsync(GlobalSystemMediaTransportControlsSession? session)
     {
@@ -321,10 +447,15 @@ public sealed class MediaSessionWatcher : IDisposable
             _session.TimelinePropertiesChanged -= OnTimelineChanged;
             _session = null;
         }
+        foreach (var s in _watched)
+        {
+            try { s.PlaybackInfoChanged -= OnAnyPlaybackChanged; } catch { }
+        }
+        _watched.Clear();
         if (_manager is not null)
         {
             _manager.CurrentSessionChanged -= OnCurrentSessionChanged;
-            _manager.SessionsChanged -= OnCurrentSessionChanged;
+            _manager.SessionsChanged -= OnSessionsChanged;
             _manager = null;
         }
     }

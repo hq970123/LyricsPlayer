@@ -154,6 +154,75 @@ public sealed class SettingsView : StackPanel
         lyrics.Children.Add(Row("歌词来源", sources, "网易云中文歌更全，LRCLIB 英文歌更全"));
         Children.Add(lyricsCard);
 
+        // ---- Which media apps to follow.
+        var (apps, appsCard) = Card("监听应用");
+        var appList = new StackPanel { Margin = new Thickness(0, 0, 0, 6) };
+        var appNote = new TextBlock { FontSize = 12, Opacity = 0.6, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) };
+        apps.Children.Add(ToggleRow("只跟随指定应用", draft.FilterApps, v =>
+        {
+            draft.FilterApps = v; RebuildApps(); Save();
+        }, out _, "关闭时自动跟随系统当前的媒体会话；打开后只认勾选的应用，浏览器等其他来源会被忽略"));
+        apps.Children.Add(appList);
+
+        void RebuildApps()
+        {
+            try
+            {
+                appList.Children.Clear();
+                Enable(appList, draft.FilterApps);
+                // Running apps first, then remembered (checked) ones that aren't running now.
+                var running = media?.GetSessionApps() ?? Array.Empty<MediaAppInfo>();
+                var rows = running.Select(a => (a.AppId, a.Name, State: a.IsPlaying ? "正在播放" : "已打开")).ToList();
+                foreach (var kv in draft.FollowApps)
+                    if (!rows.Any(r => string.Equals(r.AppId, kv.Key, StringComparison.OrdinalIgnoreCase)))
+                        rows.Add((kv.Key, string.IsNullOrWhiteSpace(kv.Value) ? AppNames.Friendly(kv.Key) : kv.Value, "未运行"));
+
+                foreach (var (id, name, state) in rows)
+                {
+                    var box = new CheckBox
+                    {
+                        IsChecked = draft.FollowApps.ContainsKey(id), MinWidth = 0,
+                        Content = name, VerticalAlignment = VerticalAlignment.Center,
+                    };
+                    ToolTipService.SetToolTip(box, id);
+                    var appId = id; var appName = name;
+                    box.Click += (_, _) =>
+                    {
+                        if (box.IsChecked == true) draft.FollowApps[appId] = appName;
+                        else draft.FollowApps.Remove(appId);
+                        UpdateAppNote();
+                        Save();
+                    };
+                    var stateText = new TextBlock { Text = state, FontSize = 12, Opacity = 0.6 };
+                    appList.Children.Add(Relabel(Row("", box), box, stateText));
+                }
+                UpdateAppNote();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"app list failed: {ex}");
+            }
+        }
+
+        void UpdateAppNote()
+        {
+            appNote.Text = !draft.FilterApps
+                ? "当前：自动，跟随系统正在播放的应用。"
+                : draft.FollowApps.Count == 0
+                    ? "还没有勾选应用，暂时仍按“自动”处理。列表里没有想要的播放器？先打开它播放一首歌，它会自动出现。"
+                    : $"只跟随：{string.Join("、", draft.FollowApps.Values)}。没有出现的播放器，打开并播放一下就会列出来。";
+        }
+
+        apps.Children.Add(appNote);
+        Children.Add(appsCard);
+        RebuildApps();
+
+        // Apps opening/closing while the page is open update the list live.
+        EventHandler? onSessions = null;
+        onSessions = (_, _) => RebuildApps();
+        Loaded += (_, _) => { if (media is not null) media.SessionsListChanged += onSessions; RebuildApps(); };
+        Unloaded += (_, _) => { if (media is not null) media.SessionsListChanged -= onSessions; };
+
         Enable(coverSizeRow, draft.ShowAlbumArt);
         Enable(titleSizeRow, draft.ShowTopLine);
         Enable(buttonSizeRow, draft.Controls != ControlsLayout.None);
@@ -248,6 +317,20 @@ public sealed class SettingsView : StackPanel
         Grid.SetColumn(control, 1);
         g.Children.Add(control);
         return g;
+    }
+
+    /// <summary>Turns a Row into "checkbox (left) … state text (right)".</summary>
+    private static Grid Relabel(Grid row, FrameworkElement left, FrameworkElement right)
+    {
+        row.Children.Clear();
+        row.MinHeight = 32;
+        left.VerticalAlignment = VerticalAlignment.Center;
+        right.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(left, 0);
+        Grid.SetColumn(right, 1);
+        row.Children.Add(left);
+        row.Children.Add(right);
+        return row;
     }
 
     private static Grid SliderRow(string label, string unit, int min, int max, int step, int value, Action<int> changed)
