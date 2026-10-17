@@ -41,12 +41,16 @@ public sealed class WidgetSettings
     public bool HideWhenIdle { get; set; }
     /// <summary>Follow only the apps in FollowApps. Off (or an empty list) follows whatever Windows plays.</summary>
     public bool FilterApps { get; set; }
-    /// <summary>Whitelisted media apps: AppUserModelId -> display name (kept so apps that aren't running still show).</summary>
-    public Dictionary<string, string> FollowApps { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// Whitelisted apps. Key: exe file name in lower case ("cloudmusic.exe"), as the volume mixer
+    /// lists them; or an AppUserModelId for an app that only showed up as a media session.
+    /// Kept so selected apps that aren't running still show in the list.
+    /// </summary>
+    public Dictionary<string, FollowApp> FollowApps { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>The app ids the watcher should follow, or null for automatic.</summary>
-    public IEnumerable<string>? EffectiveFollowApps =>
-        FilterApps && FollowApps.Count > 0 ? FollowApps.Keys : null;
+    /// <summary>The apps the watcher should follow, or null for automatic.</summary>
+    public IEnumerable<(string Key, string? Aumid)>? EffectiveFollowApps =>
+        FilterApps && FollowApps.Count > 0 ? FollowApps.Select(kv => (kv.Key, kv.Value?.Aumid)) : null;
 
     public const int MinWidth = 160;
     public const int MaxWidth = 800;
@@ -73,8 +77,8 @@ public sealed class WidgetSettings
             s.LyricFontSize = Math.Clamp(s.LyricFontSize, 10, 26);
             s.OffsetMs = Math.Clamp(s.OffsetMs, -5000, 5000);
             // JSON gives a case-sensitive dictionary (or null); ids are matched case-insensitively.
-            s.FollowApps = new Dictionary<string, string>(
-                (s.FollowApps ?? new()).Where(kv => !string.IsNullOrWhiteSpace(kv.Key))
+            s.FollowApps = new Dictionary<string, FollowApp>(
+                (s.FollowApps ?? new()).Where(kv => !string.IsNullOrWhiteSpace(kv.Key) && kv.Value is not null)
                     .GroupBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
                     .Select(g => g.First()),
                 StringComparer.OrdinalIgnoreCase);
@@ -115,6 +119,16 @@ public sealed class WidgetSettings
     public string ToJson() => JsonSerializer.Serialize(this);
 
     public WidgetSettings Clone() => FromJson(ToJson());
+}
+
+/// <summary>A followed app as saved in settings.</summary>
+public sealed class FollowApp
+{
+    public string Name { get; set; } = "";
+    /// <summary>Package AppUserModelId, when the app is packaged (store apps).</summary>
+    public string? Aumid { get; set; }
+    /// <summary>Last known exe path, used for the icon while the app isn't running.</summary>
+    public string? ExePath { get; set; }
 }
 
 public enum ControlsLayout

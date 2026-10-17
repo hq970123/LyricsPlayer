@@ -31,8 +31,8 @@ public sealed class MediaSessionWatcher : IDisposable
     private GlobalSystemMediaTransportControlsSession? _session;
     private bool _disposed;
 
-    // Optional whitelist of AppUserModelIds. Null or empty = follow whatever Windows plays.
-    private HashSet<string>? _allowed;
+    // Optional whitelist (exe key or AUMID, plus the package AUMID). Null = follow whatever Windows plays.
+    private List<(string Key, string? Aumid)>? _allowed;
     // Every session we listen to for play/pause, so a whitelisted app that starts playing
     // in the background takes over even when Windows keeps another app "current".
     private readonly List<GlobalSystemMediaTransportControlsSession> _watched = new();
@@ -66,16 +66,16 @@ public sealed class MediaSessionWatcher : IDisposable
     public bool IsFiltering => _allowed is { Count: > 0 };
 
     /// <summary>
-    /// Follow only these apps (AppUserModelIds, case-insensitive). Null or empty goes back to
-    /// automatic. Takes effect immediately.
+    /// Follow only these apps (see AppNames.Matches for how a media session is tied to an app).
+    /// Null or empty goes back to automatic. Takes effect immediately.
     /// </summary>
-    public void SetFilter(IEnumerable<string>? appIds)
+    public void SetFilter(IEnumerable<(string Key, string? Aumid)>? apps)
     {
-        var next = appIds?.Where(a => !string.IsNullOrWhiteSpace(a))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var next = apps?.Where(a => !string.IsNullOrWhiteSpace(a.Key)).ToList();
         if (next is { Count: 0 }) next = null;
-        if (next is null && _allowed is null) return;
-        if (next is not null && _allowed is not null && next.SetEquals(_allowed)) return;
+        static string Sig(List<(string Key, string? Aumid)>? l) =>
+            l is null ? "" : string.Join("|", l.Select(a => $"{a.Key}>{a.Aumid}".ToLowerInvariant()).OrderBy(x => x));
+        if (Sig(next) == Sig(_allowed)) return;
         _allowed = next;
         if (_manager is not null) _ = RepickAsync();
     }
@@ -83,8 +83,12 @@ public sealed class MediaSessionWatcher : IDisposable
     private bool IsAllowed(GlobalSystemMediaTransportControlsSession s)
     {
         if (_allowed is null) return true;
-        try { return _allowed.Contains(s.SourceAppUserModelId ?? ""); }
+        string id;
+        try { id = s.SourceAppUserModelId ?? ""; }
         catch { return false; }
+        foreach (var (key, aumid) in _allowed)
+            if (AppNames.Matches(key, aumid, id)) return true;
+        return false;
     }
 
     /// <summary>The media apps that have a session right now.</summary>

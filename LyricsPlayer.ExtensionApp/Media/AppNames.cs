@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 
 namespace LyricsPlayer.ExtensionApp.Media;
 
@@ -39,6 +39,47 @@ public static class AppNames
         ("Bilibili", "哔哩哔哩"),
     };
 
+    /// <summary>Our own name for a well-known player or browser, or null.</summary>
+    public static string? TryKnown(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return null;
+        foreach (var (key, name) in Known)
+            if (id.Contains(key, StringComparison.OrdinalIgnoreCase)) return name;
+        return null;
+    }
+
+    // SMTC ids that don't contain the exe name.
+    private static readonly (string Aumid, string Exe)[] Aliases =
+    {
+        ("308046B0AF4A39CB", "firefox.exe"),
+        ("6F193CCC56814779", "firefox.exe"), // Firefox Nightly / Developer Edition
+        ("MSEdge", "msedge.exe"),
+        ("Chrome", "chrome.exe"),
+    };
+
+    /// <summary>
+    /// Does an SMTC session (by its AppUserModelId) belong to the app saved as <paramref name="key"/>
+    /// (exe name in lower case, or an AUMID for apps that only showed up as a media session)?
+    /// </summary>
+    public static bool Matches(string key, string? savedAumid, string? sessionAumid)
+    {
+        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(sessionAumid)) return false;
+        var id = sessionAumid.Trim();
+        if (string.Equals(id, key, StringComparison.OrdinalIgnoreCase)) return true;
+        if (!string.IsNullOrWhiteSpace(savedAumid) && string.Equals(id, savedAumid, StringComparison.OrdinalIgnoreCase)) return true;
+
+        if (!key.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return false;
+        var stem = key[..^4];
+        // "cloudmusic.exe", "C:\...\cloudmusic.exe", "cloudmusic"
+        if (id.EndsWith("\\" + key, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(id, stem, StringComparison.OrdinalIgnoreCase)) return true;
+        foreach (var (aumid, exe) in Aliases)
+            if (string.Equals(id, aumid, StringComparison.OrdinalIgnoreCase))
+                return string.Equals(exe, key, StringComparison.OrdinalIgnoreCase);
+        // Explicit AUMIDs like "Tencent.QQMusic" or "SpotifyAB.SpotifyMusic_xxx!Spotify".
+        return stem.Length >= 5 && id.Contains(stem, StringComparison.OrdinalIgnoreCase);
+    }
+
     public static string Friendly(string appId)
     {
         if (string.IsNullOrWhiteSpace(appId)) return "未知应用";
@@ -47,8 +88,7 @@ public static class AppNames
 
     private static string Resolve(string id)
     {
-        foreach (var (key, name) in Known)
-            if (id.Contains(key, StringComparison.OrdinalIgnoreCase)) return name;
+        if (TryKnown(id) is { } known) return known;
 
         // Packaged apps: ask Windows for the display name.
         try

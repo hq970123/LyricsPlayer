@@ -154,54 +154,113 @@ public sealed class SettingsView : StackPanel
         lyrics.Children.Add(Row("歌词来源", sources, "网易云中文歌更全，LRCLIB 英文歌更全"));
         Children.Add(lyricsCard);
 
-        // ---- Which media apps to follow.
+        // ---- Which apps to follow: the apps that have sound, like the volume mixer.
         var (apps, appsCard) = Card("监听应用");
-        var appList = new StackPanel { Margin = new Thickness(0, 0, 0, 6) };
-        var appNote = new TextBlock { FontSize = 12, Opacity = 0.6, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) };
+        var appList = new StackPanel { Margin = new Thickness(0, 0, 0, 4) };
+        var appNote = new TextBlock { FontSize = 12, Opacity = 0.6, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 8) };
         apps.Children.Add(ToggleRow("只跟随指定应用", draft.FilterApps, v =>
         {
-            draft.FilterApps = v; RebuildApps(); Save();
+            draft.FilterApps = v; Enable(appList, v); UpdateAppNote(); Save();
         }, out _, "关闭时自动跟随系统当前的媒体会话；打开后只认勾选的应用，浏览器等其他来源会被忽略"));
+        var refresh = new HyperlinkButton { Content = "刷新", Padding = new Thickness(6, 2, 6, 2) };
+        apps.Children.Add(Row("有声音的应用", refresh, "和 Windows 音量合成器一样列出有音频会话的软件；勾选过但没在运行的也会保留"));
         apps.Children.Add(appList);
+        apps.Children.Add(appNote);
+        Children.Add(appsCard);
 
-        void RebuildApps()
+        string lastSignature = "";
+        bool refreshing = false;
+
+        async void RefreshApps(bool force = false)
         {
+            if (refreshing) return;
+            refreshing = true;
             try
             {
-                appList.Children.Clear();
-                Enable(appList, draft.FilterApps);
-                // Running apps first, then remembered (checked) ones that aren't running now.
-                var running = media?.GetSessionApps() ?? Array.Empty<MediaAppInfo>();
-                var rows = running.Select(a => (a.AppId, a.Name, State: a.IsPlaying ? "正在播放" : "已打开")).ToList();
-                foreach (var kv in draft.FollowApps)
-                    if (!rows.Any(r => string.Equals(r.AppId, kv.Key, StringComparison.OrdinalIgnoreCase)))
-                        rows.Add((kv.Key, string.IsNullOrWhiteSpace(kv.Value) ? AppNames.Friendly(kv.Key) : kv.Value, "未运行"));
-
-                foreach (var (id, name, state) in rows)
+                var audio = await AudioSessions.GetAppsAsync();
+                var media = mediaApps();
+                var rows = new List<AppRow>();
+                foreach (var a in audio)
                 {
-                    var box = new CheckBox
-                    {
-                        IsChecked = draft.FollowApps.ContainsKey(id), MinWidth = 0,
-                        Content = name, VerticalAlignment = VerticalAlignment.Center,
-                    };
-                    ToolTipService.SetToolTip(box, id);
-                    var appId = id; var appName = name;
-                    box.Click += (_, _) =>
-                    {
-                        if (box.IsChecked == true) draft.FollowApps[appId] = appName;
-                        else draft.FollowApps.Remove(appId);
-                        UpdateAppNote();
-                        Save();
-                    };
-                    var stateText = new TextBlock { Text = state, FontSize = 12, Opacity = 0.6 };
-                    appList.Children.Add(Relabel(Row("", box), box, stateText));
+                    var hasMedia = media.Any(m => AppNames.Matches(a.Key, a.Aumid, m.AppId));
+                    var state = a.IsSounding ? "正在发声" : a.IsActive ? "有声音会话" : "静默";
+                    rows.Add(new AppRow(a.Key, a.Name, a.ExePath, a.Aumid, state, hasMedia, a.IsSounding));
                 }
-                UpdateAppNote();
+                // Media sessions whose app has no audio session right now (paused players).
+                foreach (var m in media)
+                {
+                    if (rows.Any(r => AppNames.Matches(r.Key, r.Aumid, m.AppId))) continue;
+                    var key = MediaKey(m.AppId);
+                    if (rows.Any(r => string.Equals(r.Key, key, StringComparison.OrdinalIgnoreCase))) continue;
+                    rows.Add(new AppRow(key, AppNames.Friendly(m.AppId), null, key.EndsWith(".exe") ? null : m.AppId,
+                        m.IsPlaying ? "正在播放" : "已暂停", true, false));
+                }
+                // Selected apps that aren't running.
+                foreach (var kv in draft.FollowApps)
+                {
+                    if (rows.Any(r => string.Equals(r.Key, kv.Key, StringComparison.OrdinalIgnoreCase))) continue;
+                    rows.Add(new AppRow(kv.Key, kv.Value.Name.Length > 0 ? kv.Value.Name : AppNames.Friendly(kv.Key),
+                        kv.Value.ExePath, kv.Value.Aumid, "未运行", false, false));
+                }
+
+                var signature = string.Join("|", rows.Select(r => $"{r.Key}:{r.State}:{r.HasMedia}"));
+                if (!force && signature == lastSignature) return;
+                lastSignature = signature;
+                BuildAppList(rows);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"app list failed: {ex}");
             }
+            finally
+            {
+                refreshing = false;
+            }
+        }
+
+        void BuildAppList(List<AppRow> rows)
+        {
+            appList.Children.Clear();
+            if (rows.Count == 0)
+            {
+                appList.Children.Add(new TextBlock { Text = "现在没有软件在使用声音。打开播放器播放一首歌，再点“刷新”。", FontSize = 12, Opacity = 0.7, Margin = new Thickness(0, 4, 0, 4), TextWrapping = TextWrapping.Wrap });
+            }
+            foreach (var r in rows)
+            {
+                var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+                var icon = new Image { Width = 20, Height = 20, VerticalAlignment = VerticalAlignment.Center };
+                label.Children.Add(icon);
+                label.Children.Add(new TextBlock { Text = r.Name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 220 });
+                _ = LoadIconAsync(icon, r.ExePath);
+
+                var box = new CheckBox
+                {
+                    IsChecked = draft.FollowApps.ContainsKey(r.Key), MinWidth = 0,
+                    Content = label, VerticalAlignment = VerticalAlignment.Center,
+                };
+                ToolTipService.SetToolTip(box, r.Aumid is null ? r.Key : $"{r.Key}\n{r.Aumid}");
+                var row = r;
+                box.Click += (_, _) =>
+                {
+                    if (box.IsChecked == true)
+                        draft.FollowApps[row.Key] = new FollowApp { Name = row.Name, Aumid = row.Aumid, ExePath = row.ExePath };
+                    else draft.FollowApps.Remove(row.Key);
+                    UpdateAppNote();
+                    Save();
+                };
+
+                var stateText = new TextBlock
+                {
+                    Text = r.HasMedia || r.State == "未运行" ? r.State : r.State + " · 无媒体控制",
+                    FontSize = 12, Opacity = r.IsSounding ? 0.9 : 0.55,
+                };
+                if (r.IsSounding && ThemeBrush("AccentTextFillColorPrimaryBrush") is { } accent) stateText.Foreground = accent;
+                if (!r.HasMedia && r.State != "未运行")
+                    ToolTipService.SetToolTip(stateText, "这个软件没有接入系统媒体控制（SMTC），控件拿不到它的歌名和进度；勾选后等它提供媒体信息时才会显示");
+                appList.Children.Add(Relabel(Row("", box), box, stateText));
+            }
+            Enable(appList, draft.FilterApps);
+            UpdateAppNote();
         }
 
         void UpdateAppNote()
@@ -209,19 +268,30 @@ public sealed class SettingsView : StackPanel
             appNote.Text = !draft.FilterApps
                 ? "当前：自动，跟随系统正在播放的应用。"
                 : draft.FollowApps.Count == 0
-                    ? "还没有勾选应用，暂时仍按“自动”处理。列表里没有想要的播放器？先打开它播放一首歌，它会自动出现。"
-                    : $"只跟随：{string.Join("、", draft.FollowApps.Values)}。没有出现的播放器，打开并播放一下就会列出来。";
+                    ? "还没有勾选应用，暂时仍按“自动”处理。"
+                    : $"只跟随：{string.Join("、", draft.FollowApps.Values.Select(v => v.Name))}。";
         }
 
-        apps.Children.Add(appNote);
-        Children.Add(appsCard);
-        RebuildApps();
+        IReadOnlyList<MediaAppInfo> mediaApps() => media?.GetSessionApps() ?? Array.Empty<MediaAppInfo>();
 
-        // Apps opening/closing while the page is open update the list live.
-        EventHandler? onSessions = null;
-        onSessions = (_, _) => RebuildApps();
-        Loaded += (_, _) => { if (media is not null) media.SessionsListChanged += onSessions; RebuildApps(); };
-        Unloaded += (_, _) => { if (media is not null) media.SessionsListChanged -= onSessions; };
+        refresh.Click += (_, _) => RefreshApps(force: true);
+        // While the page is open, poll like the volume mixer does (cheap: a few COM calls).
+        var appTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+        appTimer.Tick += (_, _) => RefreshApps();
+        EventHandler onSessions = (_, _) => RefreshApps();
+        Loaded += (_, _) =>
+        {
+            if (media is not null) media.SessionsListChanged += onSessions;
+            appTimer.Start();
+            RefreshApps(force: true);
+        };
+        Unloaded += (_, _) =>
+        {
+            appTimer.Stop();
+            if (media is not null) media.SessionsListChanged -= onSessions;
+        };
+        Enable(appList, draft.FilterApps);
+        UpdateAppNote();
 
         Enable(coverSizeRow, draft.ShowAlbumArt);
         Enable(titleSizeRow, draft.ShowTopLine);
@@ -317,6 +387,42 @@ public sealed class SettingsView : StackPanel
         Grid.SetColumn(control, 1);
         g.Children.Add(control);
         return g;
+    }
+
+    private sealed record AppRow(string Key, string Name, string? ExePath, string? Aumid, string State, bool HasMedia, bool IsSounding);
+
+    /// <summary>Settings key for an app known only by its media session id.</summary>
+    private static string MediaKey(string aumid)
+    {
+        var id = aumid.Trim();
+        var slash = id.LastIndexOfAny(new[] { '\\', '/' });
+        var file = slash >= 0 ? id[(slash + 1)..] : id;
+        if (file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return file.ToLowerInvariant();
+        return id;
+    }
+
+    private static readonly Dictionary<string, Microsoft.UI.Xaml.Media.Imaging.BitmapImage?> IconCache =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The exe's icon via the shell thumbnail; left empty when Windows won't give one.</summary>
+    private static async Task LoadIconAsync(Image target, string? exePath)
+    {
+        if (string.IsNullOrWhiteSpace(exePath)) return;
+        try
+        {
+            if (!IconCache.TryGetValue(exePath, out var bmp))
+            {
+                IconCache[exePath] = null;
+                var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(exePath);
+                using var thumb = await file.GetThumbnailAsync(Windows.Storage.FileProperties.ThumbnailMode.SingleItem, 32);
+                if (thumb is null) return;
+                bmp = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage { DecodePixelWidth = 32 };
+                await bmp.SetSourceAsync(thumb);
+                IconCache[exePath] = bmp;
+            }
+            if (bmp is not null) target.Source = bmp;
+        }
+        catch { /* protected folders (WindowsApps) or a vanished exe */ }
     }
 
     /// <summary>Turns a Row into "checkbox (left) … state text (right)".</summary>
