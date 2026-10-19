@@ -7,15 +7,17 @@
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap uap3 rescap">
 
-  <!-- Update Publisher to match your signing certificate / Store identity. -->
+  <!-- Microsoft Store identity (Partner Center product 9PNZBDK8Q4WG).
+       CI stamps the third field with the run number (1.1.N.0); the revision
+       must stay 0 for Store submissions. -->
   <Identity
-    Name="LyricsPlayer.Widget"
-    Publisher="CN=hq970123"
-    Version="1.0.0.0" />
+    Name="6AE1F851.-WidBar"
+    Publisher="CN=5CFCD8BA-F249-4C00-B333-F7DA6E73190D"
+    Version="1.1.0.0" />
 
   <Properties>
-    <DisplayName>Lyrics Player</DisplayName>
-    <PublisherDisplayName>hq970123</PublisherDisplayName>
+    <DisplayName>歌词 - WidBar 小组件</DisplayName>
+    <PublisherDisplayName>边境悍匪TT</PublisherDisplayName>
     <Logo>Images\StoreLogo.png</Logo>
   </Properties>
 
@@ -33,7 +35,7 @@
       Executable="$targetnametoken$.exe"
       EntryPoint="$targetentrypoint$">
       <uap:VisualElements
-        DisplayName="Lyrics Player"
+        DisplayName="歌词 - WidBar 小组件"
         Description="Shows synced lyrics for whatever is playing on Windows, with playback controls."
         BackgroundColor="transparent" Square150x150Logo="Images\MediumTile.png" Square44x44Logo="Images\AppIcon.png">
         <uap:DefaultTile Square71x71Logo="Images\SmallTile.png" Wide310x150Logo="Images\WideTile.png" Square310x310Logo="Images\LargeTile.png"/>

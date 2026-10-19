@@ -12,7 +12,10 @@ permissions:
 env:
   SOLUTION: LyricsPlayer.sln
   CONFIGURATION: Release
-  PUBLISHER: CN=hq970123
+  # Must equal Identity/Publisher in Package.appxmanifest (Store identity).
+  PUBLISHER: CN=5CFCD8BA-F249-4C00-B333-F7DA6E73190D
+  # Store requires revision 0; the third field is the run number.
+  VERSION: 1.1.${{ github.run_number }}.0
 
 jobs:
   build:
@@ -40,7 +43,10 @@ jobs:
         shell: pwsh
         run: |
           $m = 'LyricsPlayer (Package)/Package.appxmanifest'
-          (Get-Content $m -Raw) -replace 'Version="1\.0\.0\.0"', 'Version="1.0.${{ github.run_number }}.0"' | Set-Content $m -Encoding utf8
+          $xml = Get-Content $m -Raw -Encoding utf8
+          if ($xml -cnotmatch 'Version="1\.1\.0\.0"') { throw 'Identity Version="1.1.0.0" not found in manifest' }
+          $xml -creplace 'Version="1\.1\.0\.0"', "Version=`"$env:VERSION`"" | Set-Content $m -Encoding utf8 -NoNewline
+          Select-String -Path $m -Pattern '<Identity' -Context 0,3 | Out-String | Write-Host
 
       - name: Restore
         run: >-
@@ -86,6 +92,11 @@ jobs:
           $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' |
             Sort-Object FullName | Select-Object -Last 1
           $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($pwd))
+          # Unsigned copy for the Microsoft Store bundle (the Store signs it)
+          $store = Join-Path $env:RUNNER_TEMP "store-$platform"
+          New-Item -ItemType Directory -Force $store | Out-Null
+          Copy-Item $msix.FullName (Join-Path $store "LyricsPlayer_$($env:VERSION)_$platform.msix")
+
           $dest = Join-Path $out "LyricsPlayer_$platform.msix"
           Copy-Item $msix.FullName $dest
           & $signtool.FullName sign /fd SHA256 /f $pfx /p $plain $dest
@@ -111,6 +122,12 @@ jobs:
           path: ${{ runner.temp }}/LyricsPlayer-${{ matrix.platform }}.zip
           if-no-files-found: error
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: store-msix-${{ matrix.platform }}
+          path: ${{ runner.temp }}/store-${{ matrix.platform }}/*.msix
+          if-no-files-found: error
+
       - name: Report build errors as an issue
         if: failure()
         shell: pwsh
@@ -127,13 +144,64 @@ jobs:
           $body | Out-File -Encoding utf8 errors.md
           gh issue create --repo "${{ github.repository }}" --title "Build failed: ${{ matrix.platform }} #${{ github.run_number }}" --body-file errors.md
 
+  store:
+    name: Store bundle (.msixupload)
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: store-msix-*
+          path: store
+          merge-multiple: true
+
+      - name: Bundle x64 + ARM64 into .msixupload
+        shell: pwsh
+        run: |
+          $makeappx = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe' |
+            Sort-Object FullName | Select-Object -Last 1
+          Write-Host "makeappx: $($makeappx.FullName)"
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $pkgs = Get-ChildItem store -Filter *.msix
+          if ($pkgs.Count -ne 2) { throw "Expected 2 .msix (x64, ARM64), found $($pkgs.Count)" }
+          foreach ($p in $pkgs) {
+            $zip = [IO.Compression.ZipFile]::OpenRead($p.FullName)
+            $entry = $zip.Entries | Where-Object FullName -eq 'AppxManifest.xml'
+            $reader = New-Object IO.StreamReader($entry.Open())
+            [xml]$man = $reader.ReadToEnd(); $reader.Close(); $zip.Dispose()
+            $id = $man.Package.Identity
+            Write-Host "$($p.Name): Name=$($id.Name) Publisher=$($id.Publisher) Version=$($id.Version) Arch=$($id.ProcessorArchitecture)"
+            if ($id.Version -ne $env:VERSION) { throw "Version mismatch in $($p.Name)" }
+          }
+
+          $out = Join-Path $env:RUNNER_TEMP 'storeout'
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $bundle = Join-Path $out "LyricsPlayer_$($env:VERSION)_x64_arm64.msixbundle"
+          & $makeappx.FullName bundle /d store /p $bundle /bv $env:VERSION /o
+          if ($LASTEXITCODE -ne 0) { throw 'makeappx bundle failed' }
+
+          # A .msixupload is a zip that contains the .msixbundle
+          $zipPath = Join-Path $env:RUNNER_TEMP "LyricsPlayer_$($env:VERSION)_x64_arm64.zip"
+          Compress-Archive -Path $bundle -DestinationPath $zipPath -Force
+          New-Item -ItemType Directory -Force upload | Out-Null
+          Move-Item $zipPath "upload\LyricsPlayer_$($env:VERSION)_x64_arm64.msixupload"
+          Get-ChildItem upload, $out | ForEach-Object { Write-Host "$($_.Name)  $([math]::Round($_.Length/1MB,2)) MB" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LyricsPlayer-Store
+          path: upload/*.msixupload
+          if-no-files-found: error
+
   release:
     name: Publish release
-    needs: build
+    needs: [build, store]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
+          pattern: LyricsPlayer-*
           path: assets
           merge-multiple: true
 
@@ -141,8 +209,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
-          gh release create "build-${{ github.run_number }}" assets/*.zip
+          gh release create "build-${{ github.run_number }}" assets/*.zip assets/*.msixupload
           --repo "${{ github.repository }}"
           --target "${{ github.sha }}"
           --title "Lyrics Player build ${{ github.run_number }}"
-          --notes "解压对应架构的 zip（大多数电脑用 x64），双击 Install.bat 即可安装。"
+          --notes "版本 ${{ env.VERSION }}。解压对应架构的 zip（大多数电脑用 x64），双击 Install.bat 即可安装。.msixupload 是提交到 Microsoft Store（Partner Center）用的 x64 + ARM64 包，不能直接安装。"

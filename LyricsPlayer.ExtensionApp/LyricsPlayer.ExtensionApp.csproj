@@ -32,7 +32,7 @@
     <WidBarPluginName>Lyrics Player</WidBarPluginName>
     <WidBarPluginDescription>Shows synced lyrics for whatever is playing on Windows, with playback controls.</WidBarPluginDescription>
     <WidBarPluginCategory>Media</WidBarPluginCategory>
-    <WidBarPluginVersion>1.0.0</WidBarPluginVersion>
+    <WidBarPluginVersion>1.1.0</WidBarPluginVersion>
     <WidBarPluginPreviewWidth>240</WidBarPluginPreviewWidth>
     <WidBarPluginConfigurable>true</WidBarPluginConfigurable>
   </PropertyGroup>

@@ -13,6 +13,9 @@ try {
     Write-Host '1/2 信任证书…'
     Import-Certificate -FilePath (Join-Path $here 'LyricsPlayer.cer') -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
 
+    # 1.1 起包名换成了商店身份，旧版（LyricsPlayer.Widget）先卸掉，免得 WidBar 里出现两个
+    Get-AppxPackage -Name 'LyricsPlayer.Widget' -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+
     Write-Host '2/2 安装 Lyrics Player…'
     $msix = Get-ChildItem $here -Filter *.msix | Select-Object -First 1
     $deps = @(Get-ChildItem (Join-Path $here 'Dependencies') -Include *.appx, *.msix -Recurse -ErrorAction SilentlyContinue | ForEach-Object FullName)
