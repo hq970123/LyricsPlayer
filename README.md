@@ -6,6 +6,10 @@
 它不自己播放音乐，而是跟随 Windows 系统媒体会话（SMTC），所以网易云音乐、QQ音乐、
 酷狗、Spotify、Apple Music、foobar2000、浏览器里的网页播放器都能用。
 
+## 截图
+
+![Lyrics Player 弹出面板：滚动歌词卡片、单曲歌词偏移与播放控制；下方为任务栏上的小组件](docs/screenshot.png)
+
 ## 结构
 
 ```text
